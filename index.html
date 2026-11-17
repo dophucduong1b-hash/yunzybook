@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>YunzyBook</title>
+
+  <!-- iOS Safari PWA Installability -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="YunzyBook" />
+  <meta name="theme-color" content="#E9F0FC" />
+
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <link rel="apple-touch-icon-precomposed" sizes="180x180" href="apple-touch-icon-precomposed.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./styles.css" />
+
+  <script>
+    if (typeof Promise.withResolvers !== 'function') {
+      Promise.withResolvers = function () {
+        let resolve, reject;
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+      };
+    }
+  </script>
+</head>
+<body>
+  <div class="app-shell">
+    <main id="main-scroll-area" class="main-scroll-area">
+
+      <!-- TAB 1: LIBRARY -->
+      <section id="tab-library" class="tab-view active">
+        <header class="app-header">
+          <div class="brand-lockup">
+            <img src="./icons/icon-192.png" alt="YunzyBook" class="brand-logo-img" />
+            <h1 class="page-title">YunzyBook</h1>
+          </div>
+          <button type="button" id="btn-add-top" class="plus-fab" aria-label="Thêm tài liệu">
+            <svg class="svg-icon lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </header>
+
+        <div id="ios-install-banner" class="ios-banner glass-surface hidden">
+          <div class="ios-banner-text">Cài YunzyBook lên Màn hình chính iPhone để dùng ngoại tuyến</div>
+          <div class="ios-banner-actions">
+            <button type="button" id="ios-banner-open" class="soft-pill-btn">Hướng dẫn</button>
+            <button type="button" id="ios-banner-dismiss" class="reader-icon-btn" aria-label="Đóng">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="search-bar glass-surface">
+          <svg class="svg-icon sm" style="color:var(--text-muted);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="library-search-input" type="search" placeholder="Tìm sách trong thư viện" autocomplete="off" />
+          <button type="button" id="library-search-clear" class="reader-icon-btn hidden" aria-label="Xóa">
+            <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div id="library-hero-wrap" class="hidden"></div>
+
+        <div id="library-filter-row" class="filter-row">
+          <button type="button" class="filter-pill bounceable selected" data-filter="ALL">Tất cả</button>
+          <button type="button" class="filter-pill bounceable" data-filter="READING">Đang đọc</button>
+          <button type="button" class="filter-pill bounceable" data-filter="FINISHED">Đã xong</button>
+          <button type="button" class="filter-pill bounceable" data-filter="FAVORITE">Yêu thích</button>
+        </div>
+
+        <div id="library-books-grid" class="books-grid"></div>
+
+        <div id="library-empty-state" class="empty-card glass-surface hidden">
+          <img src="./icons/icon-192.png" alt="YunzyBook" class="empty-logo-img" />
+          <h3>Thư viện của bạn đang trống</h3>
+          <p>Nhấn nút (+) để thêm tài liệu .html, .htm, .pdf, .docx hoặc gói .zip vào thư viện.</p>
+          <button type="button" id="btn-add-empty" class="primary-pill-btn bounceable">+ Thêm tài liệu</button>
+        </div>
+      </section>
+
+      <!-- TAB 2: GROUPS -->
+      <section id="tab-groups" class="tab-view">
+        <header class="app-header">
+          <div class="brand-lockup">
+            <img src="./icons/icon-192.png" alt="YunzyBook" class="brand-logo-img" />
+            <h1 class="page-title">Nhóm</h1>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" id="groups-btn-edit" class="white-pill-btn bounceable">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <span>Sửa nhóm</span>
+            </button>
+            <button type="button" id="groups-btn-new" class="primary-pill-btn bounceable">+ Tạo nhóm</button>
+          </div>
+        </header>
+
+        <div id="groups-empty-card" class="groups-empty-card glass-surface hidden">
+          <div class="groups-empty-icon">
+            <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </div>
+          <div>
+            <div style="font-size:15.5px;font-weight:800;margin-bottom:2px;">Chưa có nhóm môn học nào</div>
+            <div style="font-size:13px;color:var(--text-secondary);">Nhấn "+ Tạo nhóm" ở góc trên để phân loại sách</div>
+          </div>
+        </div>
+
+        <div id="groups-folder-grid" class="groups-carousel"></div>
+        <div class="section-subbar">
+          <span id="groups-books-header">Chưa phân nhóm</span>
+        </div>
+        <div id="groups-books-grid" class="books-grid"></div>
+      </section>
+
+      <!-- TAB 3: SETTINGS -->
+      <section id="tab-settings" class="tab-view">
+        <header class="app-header">
+          <h1 class="page-title">Cài đặt</h1>
+        </header>
+
+        <div class="settings-card glass-surface">
+          <button type="button" id="set-row-app-theme" class="settings-row">
+            <span class="row-icon" style="background:#5371FA;">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+            </span>
+            <span class="row-label">Giao diện ứng dụng</span>
+            <span id="set-val-app-theme" class="row-val">Tự động</span>
+          </button>
+          <button type="button" id="set-row-font" class="settings-row">
+            <span class="row-icon" style="background:#8C5CF6;">Aa</span>
+            <span class="row-label">Phông chữ mặc định</span>
+            <span id="set-val-font" class="row-val">Mặc định</span>
+          </button>
+          <div class="settings-row">
+            <span class="row-icon" style="background:#2FA87E;">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            </span>
+            <span class="row-label">Đọc to (giọng hệ thống)</span>
+            <label class="switch"><input id="set-toggle-tts" type="checkbox" /><span class="slider-track"></span></label>
+          </div>
+          <div class="settings-row">
+            <span class="row-icon" style="background:#F3924A;">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            </span>
+            <span class="row-label">Giữ màn hình sáng khi đọc</span>
+            <label class="switch"><input id="set-toggle-keep-on" type="checkbox" /><span class="slider-track"></span></label>
+          </div>
+          <div class="settings-row">
+            <span class="row-icon" style="background:#EB639B;">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V4.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5v-2a1.5 1.5 0 0 1 3 0V12"/><path d="M14 10.5a1.5 1.5 0 0 1 3 0V12"/><path d="M17 11.5a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-2 .2a6 6 0 0 1-5.2-3l-2.4-4.2a1.5 1.5 0 0 1 2.5-1.6L8 14"/></svg>
+            </span>
+            <span class="row-label">Chạm cạnh để lật trang</span>
+            <label class="switch"><input id="set-toggle-tap-edge" type="checkbox" /><span class="slider-track"></span></label>
+          </div>
+          <div class="slider-block">
+            <div class="slider-header">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span class="row-icon" style="background:#44AFD9;">
+                  <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                </span>
+                <span>Độ mờ giao diện kính</span>
+              </div>
+              <span id="set-glass-opacity-val" style="color:var(--primary-blue);font-weight:700;">78%</span>
+            </div>
+            <input id="set-glass-opacity-slider" class="range-input" type="range" min="25" max="100" value="78" />
+          </div>
+        </div>
+
+        <div class="settings-card glass-surface">
+          <div class="settings-card-header">
+            <span class="settings-card-title">Tinh chỉnh giao diện đọc (Aa)</span>
+            <span id="set-font-summary" class="settings-card-meta">17 pt · Chuẩn</span>
+          </div>
+          <div class="font-slider-pill">
+            <button type="button" id="set-font-minus" class="font-step-btn bounceable">A−</button>
+            <input id="set-font-slider" class="range-input" style="flex:1;" type="range" min="12" max="28" value="17" />
+            <button type="button" id="set-font-plus" class="font-step-btn bounceable">A+</button>
+          </div>
+          <div id="set-theme-swatches" class="swatches-row">
+            <button type="button" class="swatch-btn bounceable" data-set-theme="ORIGINAL" style="background:#fff;color:#3654E6;">Gốc</button>
+            <button type="button" class="swatch-btn bounceable" data-set-theme="LIGHT" style="background:#fff;color:#141B34;">Sáng</button>
+            <button type="button" class="swatch-btn bounceable" data-set-theme="SEPIA" style="background:#F3E9D2;color:#3E3021;">Sepia</button>
+            <button type="button" class="swatch-btn bounceable" data-set-theme="DARK" style="background:#151926;color:#fff;">Tối</button>
+          </div>
+        </div>
+
+        <div class="settings-card glass-surface">
+          <div class="settings-card-header">
+            <span class="settings-card-title">Bộ nhớ thư viện</span>
+            <span id="set-storage-summary" class="row-val">0.0 MB · 0 sách</span>
+          </div>
+          <div class="segmented-storage-bar">
+            <div style="width:55%;background:#3654E6;"></div>
+            <div style="width:22%;background:#8C5CF6;"></div>
+            <div style="width:11%;background:#F3924A;"></div>
+          </div>
+          <div class="storage-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#3654E6;"></span>Sách</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#8C5CF6;"></span>Bìa</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#F3924A;"></span>Dữ liệu</span>
+          </div>
+          <div class="storage-actions">
+            <button type="button" id="set-btn-backup" class="primary-pill-btn bounceable">Sao lưu ra file</button>
+            <button type="button" id="set-btn-restore" class="soft-pill-btn bounceable">Khôi phục</button>
+          </div>
+        </div>
+
+        <div class="settings-card glass-surface">
+          <button type="button" id="set-row-ios-install" class="settings-row bounceable">
+            <span class="row-icon" style="background:#3654E6;">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+            </span>
+            <span class="row-label">Cài ứng dụng lên iPhone</span>
+            <span class="row-val">Hướng dẫn ›</span>
+          </button>
+          <div class="settings-row">
+            <span class="row-label">Về YunzyBook</span>
+            <span class="row-val">v1.3 · hoạt động ngoại tuyến</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Floating Liquid Glass Taskbar (matches Android LiquidGlassTaskbar.kt) -->
+    <nav id="liquid-taskbar" class="liquid-taskbar glass-surface" aria-label="Điều hướng chính">
+      <button type="button" class="taskbar-item bounceable selected" data-tab="library" aria-label="Thư viện">
+        <svg class="svg-icon lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.2C8.8 3.4 4.2 3.4 2 5v14c2.2-1.6 6.8-1.6 10 .2 3.2-1.8 7.8-1.8 10-.2V5c-2.2-1.6-6.8-1.6-10 .2Z"/><path d="M12 5.2v14"/></svg>
+        <span class="tab-label">Thư viện</span>
+      </button>
+      <button type="button" class="taskbar-item bounceable" data-tab="groups" aria-label="Nhóm">
+        <svg class="svg-icon lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="tab-label">Nhóm</span>
+      </button>
+      <button type="button" class="taskbar-item bounceable" data-tab="settings" aria-label="Cài đặt">
+        <svg class="svg-icon lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="15" cy="8" r="2.6" fill="#fff"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="9" cy="16" r="2.6" fill="#fff"/></svg>
+        <span class="tab-label">Cài đặt</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Hidden file inputs -->
+  <input id="file-import-input" type="file" multiple accept=".html,.htm,.pdf,.docx,.zip,.txt" class="hidden" />
+  <input id="backup-restore-input" type="file" accept=".zip" class="hidden" />
+  <input id="cover-pick-input" type="file" accept="image/*" class="hidden" />
+
+  <!-- Compact Top-Right (+) Add Popover -->
+  <div id="add-menu-popover" class="popover-backdrop hidden">
+    <div class="add-popover-card glass-surface">
+      <button type="button" id="add-opt-pick-file" class="add-opt-btn bounceable">
+        <svg class="svg-icon sm" style="color:var(--primary-blue);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>Chọn tệp</span>
+      </button>
+      <button type="button" id="add-opt-create-html" class="add-opt-btn bounceable">
+        <svg class="svg-icon sm" style="color:var(--primary-blue);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <span>Tạo file</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Create HTML Modal -->
+  <div id="create-html-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-surface">
+      <div class="sheet-header">
+        <h3>Tạo tài liệu HTML</h3>
+      </div>
+      <input id="create-html-title" class="input-field" type="text" placeholder="Tên sách (tự động nếu bỏ trống)" />
+      <div id="create-html-colors" class="colors-row"></div>
+      <textarea id="create-html-code" class="code-textarea" placeholder="Dán mã HTML vào đây..."></textarea>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" id="create-html-cancel" class="soft-pill-btn">Hủy</button>
+        <button type="button" id="create-html-save" class="primary-pill-btn">Lưu sách</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lifted Book Context Menu Overlay (Long-Press / Hold) -->
+  <div id="book-action-modal" class="modal-backdrop centered hidden">
+    <div class="context-lifted-wrap">
+      <div id="context-cover-preview" class="context-cover-preview"></div>
+      <div id="book-action-title" class="context-book-title">Tài liệu</div>
+      <div class="context-menu-card glass-surface">
+        <button type="button" id="book-act-cover" class="context-row bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          <span>Đổi ảnh bìa</span>
+        </button>
+        <button type="button" id="book-act-rename" class="context-row bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <span>Đổi tên</span>
+        </button>
+        <button type="button" id="book-act-group" class="context-row bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="11" x2="12" y2="15"/><line x1="10" y1="13" x2="14" y2="13"/></svg>
+          <span>Thêm vào nhóm</span>
+        </button>
+        <button type="button" id="book-act-fav" class="context-row bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+          <span id="book-act-fav-label">Yêu thích</span>
+        </button>
+        <button type="button" id="book-act-share" class="context-row bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+          <span>Chia sẻ tài liệu</span>
+        </button>
+        <div class="menu-divider"></div>
+        <button type="button" id="book-act-delete" class="context-row danger bounceable">
+          <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>Xóa sách</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cover Editor Sheet (12 Cover Styles + Device Image) -->
+  <div id="cover-editor-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-surface">
+      <div class="sheet-header">
+        <h3>Ảnh bìa</h3>
+        <button type="button" id="cover-ed-close" class="reader-icon-btn soft bounceable" aria-label="Đóng">
+          <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="cover-editor-top">
+        <div id="cover-ed-preview" class="cover-editor-thumb"></div>
+        <div style="flex:1;min-width:0;">
+          <div id="cover-ed-book-name" style="font-size:16px;font-weight:800;margin-bottom:6px;">Tên sách</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.4;margin-bottom:10px;">Chọn mẫu bìa có sẵn hoặc dùng ảnh riêng từ máy.</div>
+          <button type="button" id="cover-ed-pick-img" class="soft-pill-btn bounceable">Chọn ảnh từ máy</button>
+        </div>
+      </div>
+      <div style="font-size:13px;font-weight:700;color:var(--text-secondary);">Chọn mẫu bìa</div>
+      <div id="cover-palette-grid" class="cover-styles-grid"></div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" id="cover-ed-cancel" class="soft-pill-btn bounceable" style="flex:1;">Hủy</button>
+        <button type="button" id="cover-ed-save" class="primary-pill-btn bounceable" style="flex:1.4;">Lưu ảnh bìa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-App Input Modal (Rename / Create Group) -->
+  <div id="input-dialog-modal" class="modal-backdrop centered hidden">
+    <div class="modal-card glass-surface" style="max-width:360px;">
+      <div class="sheet-header">
+        <h3 id="input-dialog-title">Nhập tên</h3>
+      </div>
+      <input id="input-dialog-field" class="input-field" type="text" placeholder="Nhập nội dung..." />
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" id="input-dialog-cancel" class="soft-pill-btn bounceable">Hủy</button>
+        <button type="button" id="input-dialog-ok" class="primary-pill-btn bounceable">Lưu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-App Group Picker Modal -->
+  <div id="group-picker-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-surface">
+      <div class="sheet-header">
+        <h3 id="group-picker-title">Phân loại nhóm</h3>
+        <button type="button" id="group-picker-close" class="reader-icon-btn soft bounceable" aria-label="Đóng">
+          <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="group-picker-list" class="group-pick-list"></div>
+      <div style="display:flex;gap:8px;">
+        <input id="group-picker-new-input" class="input-field" style="margin:0;flex:1;" type="text" placeholder="Tạo nhóm mới..." />
+        <button type="button" id="group-picker-new-add" class="primary-pill-btn bounceable">Thêm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-App Confirm Modal -->
+  <div id="confirm-dialog-modal" class="modal-backdrop centered hidden">
+    <div class="modal-card glass-surface" style="max-width:360px;">
+      <div class="sheet-header">
+        <h3 id="confirm-dialog-title">Xác nhận</h3>
+      </div>
+      <p id="confirm-dialog-msg" style="margin:0 0 18px;font-size:14.5px;color:var(--text-secondary);line-height:1.45;"></p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" id="confirm-dialog-cancel" class="soft-pill-btn bounceable">Hủy</button>
+        <button type="button" id="confirm-dialog-ok" class="primary-pill-btn bounceable" style="background:var(--danger-red);">Xác nhận</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- iOS Install Guide Modal -->
+  <div id="ios-guide-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-surface">
+      <div class="sheet-header">
+        <h3>Cài YunzyBook lên iPhone</h3>
+      </div>
+      <ol class="ios-steps">
+        <li>Mở trang YunzyBook này bằng trình duyệt <strong>Safari</strong> trên iPhone.</li>
+        <li>Nhấn nút <strong>Chia sẻ (Share)</strong> hình vuông có mũi tên hướng lên ở thanh dưới Safari.</li>
+        <li>Cuộn xuống và chọn <strong>Thêm vào MH chính (Add to Home Screen)</strong> → nhấn <strong>Thêm</strong>.</li>
+        <li>Mở YunzyBook từ biểu tượng ngoài màn hình chính: ứng dụng chạy toàn màn hình và lưu toàn bộ HTML, PDF, DOCX ngoại tuyến trên iPhone.</li>
+      </ol>
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" id="ios-guide-close" class="primary-pill-btn">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- READER OVERLAY -->
+  <div id="reader-overlay" class="reader-overlay hidden">
+    <div id="reader-stage" class="reader-stage"></div>
+    <div id="reader-brightness-overlay" class="reader-brightness-overlay"></div>
+
+    <!-- Read Mode Top Bar -->
+    <header id="reader-topbar-read" class="reader-topbar glass-surface">
+      <button type="button" id="reader-btn-back" class="reader-icon-btn" aria-label="Quay lại">
+        <svg class="svg-icon lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div id="reader-book-title" class="reader-title">Tài liệu</div>
+      <button type="button" id="reader-btn-tts" class="reader-icon-btn soft hidden" aria-label="Đọc to">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+      </button>
+      <button type="button" id="reader-btn-edit" class="reader-icon-btn soft" aria-label="Chỉnh sửa">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </button>
+      <button type="button" id="reader-btn-aa" class="reader-aa-btn">Aa</button>
+      <button type="button" id="reader-btn-search" class="reader-icon-btn" aria-label="Tìm trong bài">
+        <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </button>
+      <button type="button" id="reader-btn-bookmark" class="reader-icon-btn soft" aria-label="Đánh dấu">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+    </header>
+
+    <!-- Word-Mobile Edit Mode Top Bar -->
+    <header id="reader-topbar-edit" class="reader-topbar glass-surface hidden">
+      <button type="button" id="editor-btn-close" class="reader-icon-btn" aria-label="Thoát chỉnh sửa">
+        <svg class="svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+      <div class="editor-title-col">
+        <span id="editor-book-title" class="reader-title">Chỉnh sửa</span>
+        <span id="editor-status-text" class="editor-sub">Chế độ chỉnh sửa</span>
+      </div>
+      <button type="button" id="editor-btn-undo" class="reader-icon-btn" aria-label="Hoàn tác">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+      </button>
+      <button type="button" id="editor-btn-redo" class="reader-icon-btn" aria-label="Làm lại">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+      </button>
+      <button type="button" id="editor-btn-save" class="editor-save-pill">Lưu</button>
+      <button type="button" id="editor-btn-more" class="reader-icon-btn" aria-label="Tùy chọn lưu">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+    </header>
+
+    <!-- Save Options Dropdown -->
+    <div id="editor-save-dropdown" class="dropdown-menu glass-surface hidden">
+      <button type="button" id="editor-opt-save-direct" class="dropdown-item">Lưu trực tiếp</button>
+      <button type="button" id="editor-opt-save-copy" class="dropdown-item">Lưu bản sao vào thư viện</button>
+      <button type="button" id="editor-opt-export-docx" class="dropdown-item">Xuất file .docx ra máy</button>
+    </div>
+
+    <!-- Formatting Ribbon -->
+    <div id="word-editor-ribbon" class="word-ribbon glass-surface hidden">
+      <button type="button" class="reader-icon-btn" data-action="blur" aria-label="Ẩn bàn phím">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 15h8"/></svg>
+      </button>
+      <div class="ribbon-scroll">
+        <button type="button" class="ribbon-chip" data-cmd="bold"><strong>B</strong></button>
+        <button type="button" class="ribbon-chip" data-cmd="italic"><em>I</em></button>
+        <button type="button" class="ribbon-chip" data-cmd="underline"><u>U</u></button>
+        <button type="button" class="ribbon-chip" data-cmd="strikeThrough"><s>S</s></button>
+        <button type="button" class="ribbon-chip" data-action="highlight" aria-label="Tô sáng">HL</button>
+        <button type="button" class="ribbon-chip" data-block="p">P</button>
+        <button type="button" class="ribbon-chip" data-block="h1">H1</button>
+        <button type="button" class="ribbon-chip" data-block="h2">H2</button>
+        <button type="button" class="ribbon-chip" data-block="h3">H3</button>
+        <button type="button" class="ribbon-chip" data-cmd="insertUnorderedList">• List</button>
+        <button type="button" class="ribbon-chip" data-cmd="insertOrderedList">1. List</button>
+        <button type="button" class="ribbon-chip" data-cmd="justifyLeft">Trái</button>
+        <button type="button" class="ribbon-chip" data-cmd="justifyCenter">Giữa</button>
+        <button type="button" class="ribbon-chip" data-cmd="justifyRight">Phải</button>
+        <button type="button" class="ribbon-chip" data-action="pagebreak">+ Ngắt trang</button>
+        <button type="button" class="ribbon-chip" data-cmd="removeFormat">Tx</button>
+      </div>
+    </div>
+
+    <!-- Edge Tap Zones & Page Pill -->
+    <button type="button" id="reader-edge-left" class="edge-tap-zone left hidden" aria-label="Trang trước"></button>
+    <button type="button" id="reader-edge-right" class="edge-tap-zone right hidden" aria-label="Trang sau"></button>
+
+    <div id="reader-page-nav" class="page-nav-pill glass-surface hidden">
+      <button type="button" id="reader-page-prev" class="reader-icon-btn soft" aria-label="Trang trước">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <span id="reader-page-nav-text" class="page-nav-text">Trang 1 / 1</span>
+      <button type="button" id="reader-page-next" class="reader-icon-btn soft" aria-label="Trang sau">
+        <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </div>
+
+    <!-- Aa Appearance Sheet -->
+    <div id="aa-sheet-backdrop" class="modal-backdrop hidden">
+      <div id="aa-sheet" class="modal-card glass-surface">
+        <div class="sheet-header">
+          <h3>Tùy chỉnh đọc</h3>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button type="button" id="aa-btn-reset" class="soft-pill-btn">Mặc định</button>
+            <button type="button" id="aa-btn-close" class="reader-icon-btn soft" aria-label="Đóng">
+              <svg class="svg-icon sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="swatches-row">
+          <button type="button" class="swatch-btn" data-theme="ORIGINAL" style="background:#fff;color:#3654E6;">Tự động</button>
+          <button type="button" class="swatch-btn" data-theme="LIGHT" style="background:#F7F8FC;color:#151C34;">Sáng</button>
+          <button type="button" class="swatch-btn" data-theme="SEPIA" style="background:#F4ECD8;color:#3B2E1E;">Sepia</button>
+          <button type="button" class="swatch-btn" data-theme="DARK" style="background:#151926;color:#fff;">Tối</button>
+        </div>
+        <div class="settings-row">
+          <span class="row-label">Cỡ chữ</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button type="button" id="aa-font-minus" class="soft-pill-btn">A-</button>
+            <strong id="aa-font-size-val">17pt</strong>
+            <button type="button" id="aa-font-plus" class="soft-pill-btn">A+</button>
+          </div>
+        </div>
+        <div class="swatches-row">
+          <button type="button" class="swatch-btn" data-font="ORIGINAL">Gốc</button>
+          <button type="button" class="swatch-btn" data-font="MODERN">Hiện đại</button>
+          <button type="button" class="swatch-btn" data-font="CLASSIC">Cổ điển</button>
+          <button type="button" class="swatch-btn" data-font="SYSTEM">Hệ thống</button>
+        </div>
+        <div class="swatches-row" style="grid-template-columns:repeat(3,1fr);">
+          <button type="button" class="swatch-btn" data-spacing="COMPACT">Gọn</button>
+          <button type="button" class="swatch-btn" data-spacing="NORMAL">Chuẩn</button>
+          <button type="button" class="swatch-btn" data-spacing="RELAXED">Thoáng</button>
+        </div>
+        <div class="swatches-row" style="grid-template-columns:repeat(2,1fr);">
+          <button type="button" class="swatch-btn" data-pagemode="SCROLL">Cuộn dọc</button>
+          <button type="button" class="swatch-btn" data-pagemode="PAGINATED">Lật trang</button>
+        </div>
+        <div class="slider-block">
+          <div class="slider-header"><span>Độ sáng đọc</span><span id="aa-brightness-val">72%</span></div>
+          <input id="aa-brightness-slider" class="range-input" type="range" min="15" max="100" value="72" />
+        </div>
+      </div>
+    </div>
+
+    <!-- In-Doc Search Overlay -->
+    <div id="reader-search-overlay" class="search-overlay hidden">
+      <div class="search-panel glass-surface">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+          <input id="reader-search-input" class="input-field" style="margin:0;flex:1;" type="search" placeholder="Tìm nội dung trong tài liệu..." />
+          <span id="reader-search-count" class="soft-pill-btn hidden">0</span>
+          <button type="button" id="reader-search-close" class="soft-pill-btn">Đóng</button>
+        </div>
+        <div id="reader-search-results" class="search-results-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-pill" class="toast-pill hidden"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
