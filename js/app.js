@@ -813,14 +813,16 @@ function initTouchAndLongPressGestures() {
   const scrollArea = document.getElementById('main-scroll-area');
   const taskbar = document.getElementById('liquid-taskbar');
   let lastY = 0;
-  scrollArea.addEventListener('scroll', () => {
+  const onScroll = () => {
     cancelHold();
     clearPressed();
-    const y = scrollArea.scrollTop;
+    const y = Math.max(window.scrollY || 0, document.documentElement.scrollTop || 0, scrollArea?.scrollTop || 0);
     if (y > 40 && y > lastY + 12) taskbar?.classList.add('taskbar-hidden');
     else if (y < lastY - 8 || y <= 20) taskbar?.classList.remove('taskbar-hidden');
     lastY = y;
-  }, { passive: true });
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  scrollArea?.addEventListener('scroll', onScroll, { passive: true });
 }
 
 function scrubThirdPartyBanners() {
@@ -843,7 +845,15 @@ function showIosInstallModalIfFirstVisit() {
 
 async function bootstrap() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let swReloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !swReloading) {
+        swReloading = true;
+        window.location.reload();
+      }
+    });
+    navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch(() => {});
   }
 
   settings = await loadSettings();

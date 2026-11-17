@@ -1,4 +1,4 @@
-const CACHE_NAME = 'yunzybook-pwa-v1.3.0';
+const CACHE_NAME = 'yunzybook-pwa-v1.4.0';
 
 const PRECACHE_URLS = [
   './',
@@ -24,7 +24,13 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        PRECACHE_URLS.map((url) =>
+          cache.add(new Request(url, { cache: 'reload' }))
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -46,21 +52,29 @@ self.addEventListener('fetch', (event) => {
 
   if (req.mode === 'navigate') {
     event.respondWith(
-      caches.match('./index.html').then((cached) => cached || fetch(req))
+      fetch(req)
+        .then((resp) => {
+          if (resp && resp.status === 200) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', clone));
+          }
+          return resp;
+        })
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }
 
+  // Network-First with Cache Fallback: always gets fresh UI when online, works 100% offline
   event.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((resp) => {
+    fetch(req)
+      .then((resp) => {
         if (resp && resp.status === 200 && resp.type === 'basic') {
           const clone = resp.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
         }
         return resp;
-      });
-    })
+      })
+      .catch(() => caches.match(req, { ignoreSearch: true }))
   );
 });
