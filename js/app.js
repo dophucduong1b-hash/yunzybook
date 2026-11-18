@@ -46,10 +46,18 @@ let settings = { ...DEFAULT_SETTINGS };
 let activeTab = 'library';
 let searchQuery = '';
 let selectedFilter = 'ALL';
-let selectedGroup = null;
+let selectedGroup = sessionStorage.getItem('yunzy_selected_group') || null;
 let toastTimer = null;
 let pendingCoverBookId = null;
 let lastLongPressAt = 0;
+
+function setSelectedGroup(val) {
+  selectedGroup = val || null;
+  try {
+    if (selectedGroup) sessionStorage.setItem('yunzy_selected_group', selectedGroup);
+    else sessionStorage.removeItem('yunzy_selected_group');
+  } catch (_) {}
+}
 
 function showToast(msg) {
   const el = document.getElementById('toast-pill');
@@ -229,7 +237,7 @@ function openCoverEditorModal(book) {
     }
     gridEl.innerHTML = COVER_PALETTES.map((pal, idx) => `
       <button type="button" class="cover-style-tile bounceable ${!useCustom && selectedIdx === idx ? 'selected' : ''}" data-cstyle="${idx}" aria-label="${escapeAttr(pal.name)}">
-        ${renderCoverMarkup({ ...book, customCoverDataUrl: null, coverColorIndex: idx }, '', idx)}
+        ${renderCoverMarkup({ ...book, customCoverDataUrl: null, coverColorIndex: idx }, '', idx, { isMiniature: true })}
       </button>
     `).join('');
   };
@@ -385,7 +393,7 @@ function renderLibraryTab() {
     heroWrap.classList.remove('hidden');
     heroWrap.innerHTML = `
       <div class="hero-glass-card" data-open-hero="${escapeAttr(heroBook.id)}">
-        <div class="hero-cover">${renderCoverMarkup(heroBook)}</div>
+        <div class="hero-cover">${renderCoverMarkup(heroBook, '', null, { isMiniature: true })}</div>
         <div class="hero-info">
           <span class="hero-eyebrow">ĐANG ĐỌC</span>
           <h3 class="hero-title">${escapeAttr(heroBook.title)}</h3>
@@ -415,25 +423,47 @@ function renderLibraryTab() {
 function renderGroupsTab() {
   const emptyCard = document.getElementById('groups-empty-card');
   const cardsEl = document.getElementById('groups-folder-grid');
+  const filterRowEl = document.getElementById('groups-filter-row');
   const booksHeader = document.getElementById('groups-books-header');
   const booksGrid = document.getElementById('groups-books-grid');
+
+  const allGroups = [];
+  const seenLower = new Set();
+  for (const g of groups) {
+    const clean = (g || '').trim();
+    if (clean && !seenLower.has(clean.toLowerCase())) {
+      seenLower.add(clean.toLowerCase());
+      allGroups.push(clean);
+    }
+  }
+  for (const b of books) {
+    const clean = (b.groupName || '').trim();
+    if (clean && !seenLower.has(clean.toLowerCase())) {
+      seenLower.add(clean.toLowerCase());
+      allGroups.push(clean);
+    }
+  }
 
   const counts = new Map();
   let ungroupedCount = 0;
   for (const b of books) {
     const g = (b.groupName || '').trim();
     if (!g) ungroupedCount++;
-    else counts.set(g, (counts.get(g) || 0) + 1);
+    else counts.set(g.toLowerCase(), (counts.get(g.toLowerCase()) || 0) + 1);
   }
 
-  if (emptyCard) emptyCard.classList.toggle('hidden', groups.length > 0);
+  if (emptyCard) emptyCard.classList.toggle('hidden', allGroups.length > 0);
 
-  if (selectedGroup && selectedGroup !== '__UNGROUPED__' && !groups.includes(selectedGroup)) {
-    selectedGroup = null;
+  if (
+    selectedGroup &&
+    selectedGroup !== '__UNGROUPED__' &&
+    !allGroups.some((g) => g.toLowerCase() === selectedGroup.toLowerCase())
+  ) {
+    setSelectedGroup(null);
   }
 
-  cardsEl.innerHTML = groups.map((g, idx) => {
-    const isSel = selectedGroup === g;
+  cardsEl.innerHTML = allGroups.map((g, idx) => {
+    const isSel = selectedGroup && selectedGroup !== '__UNGROUPED__' && selectedGroup.toLowerCase() === g.toLowerCase();
     const accent = GROUP_ACCENTS[idx % GROUP_ACCENTS.length];
     return `
       <div class="group-folder-card ${isSel ? 'selected' : ''}" data-select-group="${escapeAttr(g)}">
@@ -447,17 +477,40 @@ function renderGroupsTab() {
           </div>
         </div>
         <div class="group-name">${escapeAttr(g)}</div>
-        <div class="group-count">${counts.get(g) || 0} tài liệu</div>
+        <div class="group-count">${counts.get(g.toLowerCase()) || 0} tài liệu</div>
       </div>
     `;
   }).join('');
 
-  const groupBooks = selectedGroup
-    ? books.filter((b) => (b.groupName || '').trim() === selectedGroup)
-    : books.filter((b) => !(b.groupName || '').trim());
-  booksHeader.textContent = selectedGroup
-    ? `${selectedGroup} · ${groupBooks.length} sách`
-    : `Chưa phân nhóm · ${ungroupedCount} sách`;
+  if (filterRowEl) {
+    const pills = [
+      `<button type="button" class="filter-pill bounceable ${selectedGroup === null ? 'selected' : ''}" data-group-filter="">Tất cả (${books.length})</button>`,
+      ...allGroups.map((g) => {
+        const sel = selectedGroup && selectedGroup !== '__UNGROUPED__' && selectedGroup.toLowerCase() === g.toLowerCase();
+        return `<button type="button" class="filter-pill bounceable ${sel ? 'selected' : ''}" data-group-filter="${escapeAttr(g)}">${escapeAttr(g)}</button>`;
+      })
+    ];
+    if (ungroupedCount > 0) {
+      pills.push(`<button type="button" class="filter-pill bounceable ${selectedGroup === '__UNGROUPED__' ? 'selected' : ''}" data-group-filter="__UNGROUPED__">Chưa phân nhóm (${ungroupedCount})</button>`);
+    }
+    filterRowEl.innerHTML = pills.join('');
+  }
+
+  let groupBooks;
+  let headerLabel;
+  if (selectedGroup === null) {
+    groupBooks = books;
+    headerLabel = `Tất cả tài liệu · ${books.length} sách`;
+  } else if (selectedGroup === '__UNGROUPED__') {
+    groupBooks = books.filter((b) => !(b.groupName || '').trim());
+    headerLabel = `Chưa phân nhóm · ${groupBooks.length} sách`;
+  } else {
+    const targetLower = selectedGroup.toLowerCase();
+    groupBooks = books.filter((b) => (b.groupName || '').trim().toLowerCase() === targetLower);
+    headerLabel = `${selectedGroup} · ${groupBooks.length} sách`;
+  }
+
+  booksHeader.textContent = headerLabel;
   renderBookGrid(booksGrid, groupBooks);
 }
 
@@ -867,9 +920,18 @@ async function bootstrap() {
   scrubThirdPartyBanners();
   showIosInstallModalIfFirstVisit();
 
-  // Taskbar tab clicks
+  // Taskbar tab clicks & consume all touches so underlying book covers never receive them
+  const taskbarEl = document.getElementById('liquid-taskbar');
+  if (taskbarEl) {
+    ['pointerdown', 'touchstart', 'click'].forEach((evt) => {
+      taskbarEl.addEventListener(evt, (e) => e.stopPropagation());
+    });
+  }
   document.querySelectorAll('.taskbar-item').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchTab(btn.dataset.tab);
+    });
   });
 
   // Search & filter pills
@@ -948,7 +1010,7 @@ async function bootstrap() {
         for (const b of books.filter((x) => x.groupName === targetGroup)) {
           await upsertBook({ ...b, groupName: clean });
         }
-        if (selectedGroup === targetGroup) selectedGroup = clean;
+        if (selectedGroup === targetGroup) setSelectedGroup(clean);
         books = await loadAllBooks();
         renderAllTabs();
       }
@@ -965,17 +1027,26 @@ async function bootstrap() {
       for (const b of books.filter((x) => x.groupName === targetGroup)) {
         await upsertBook({ ...b, groupName: '' });
       }
-      if (selectedGroup === targetGroup) selectedGroup = null;
+      if (selectedGroup === targetGroup) setSelectedGroup(null);
       books = await loadAllBooks();
       renderAllTabs();
       showToast(`Đã xóa nhóm "${targetGroup}"`);
       return;
     }
 
+    const groupFilterBtn = e.target.closest('[data-group-filter]');
+    if (groupFilterBtn) {
+      const g = groupFilterBtn.dataset.groupFilter;
+      if (!g) setSelectedGroup(null);
+      else setSelectedGroup(selectedGroup?.toLowerCase() === g.toLowerCase() ? null : g);
+      renderGroupsTab();
+      return;
+    }
+
     const groupBtn = e.target.closest('[data-select-group]');
     if (groupBtn) {
       const g = groupBtn.dataset.selectGroup;
-      selectedGroup = selectedGroup === g ? null : g;
+      setSelectedGroup(selectedGroup?.toLowerCase() === g.toLowerCase() ? null : g);
       renderGroupsTab();
       return;
     }
@@ -1065,13 +1136,13 @@ async function bootstrap() {
         groups.push(clean);
         await saveGroups(groups);
       }
-      selectedGroup = clean;
+      setSelectedGroup(clean);
       renderGroupsTab();
       showToast(`Đã tạo nhóm "${clean}"`);
     }
   });
   document.getElementById('groups-btn-edit').addEventListener('click', async () => {
-    const target = selectedGroup;
+    const target = selectedGroup && selectedGroup !== '__UNGROUPED__' ? selectedGroup : null;
     if (!target) {
       showToast('Chạm vào một thẻ nhóm bên dưới để sửa hoặc xóa');
       return;
@@ -1084,7 +1155,7 @@ async function bootstrap() {
       for (const b of books.filter((x) => x.groupName === target)) {
         await upsertBook({ ...b, groupName: clean });
       }
-      selectedGroup = clean;
+      setSelectedGroup(clean);
       books = await loadAllBooks();
       renderAllTabs();
     }
