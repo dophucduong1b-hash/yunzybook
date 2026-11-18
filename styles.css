@@ -942,12 +942,12 @@ button,
   top: calc(var(--safe-top) + 10px);
   left: 14px;
   right: 14px;
-  height: 52px;
+  height: 56px;
   border-radius: 999px;
-  padding: 0 8px;
+  padding: 0 9px 0 6px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   z-index: 50;
   max-width: 920px;
   margin: 0 auto;
@@ -968,10 +968,27 @@ button,
 }
 .reader-icon-btn.soft { background: #EDF1FC; color: var(--primary-blue); }
 .reader-icon-btn.active { background: var(--primary-blue); color: #fff; }
+.reader-more-pill {
+  width: 38px;
+  height: 38px;
+  background: #E8EEFF;
+  color: var(--primary-blue);
+}
+.reader-more-pill.active {
+  background: var(--primary-blue);
+  color: #fff;
+}
 
-.reader-title {
+.reader-title-stack {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 4px;
+}
+.reader-title {
   font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
@@ -979,21 +996,47 @@ button,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.reader-sub {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .reader-aa-btn {
   height: 36px;
-  padding: 0 12px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 0;
-  background: #EDF1FC;
+  background: transparent;
   color: var(--primary-blue);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 800;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+}
+.reader-aa-btn.active {
+  background: #E8EEFF;
+}
+
+.reader-more-menu {
+  top: calc(var(--safe-top) + 74px);
+  right: max(14px, calc((100vw - 920px) / 2));
+  width: 216px;
+  background: #FFFFFF;
+  border: 1px solid #E6ECF8;
+  box-shadow: 0 14px 32px rgba(20, 30, 70, 0.16);
+}
+.reader-more-menu .dropdown-item.is-bookmarked {
+  color: var(--primary-blue);
+}
+.reader-more-menu .dropdown-item.active {
+  color: var(--primary-blue);
 }
 
 .editor-title-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }

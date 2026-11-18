@@ -39,15 +39,20 @@ export function createReaderController({
   const topBarRead = document.getElementById('reader-topbar-read');
   const topBarEdit = document.getElementById('reader-topbar-edit');
   const titleEl = document.getElementById('reader-book-title');
+  const subEl = document.getElementById('reader-book-sub');
   const editTitleEl = document.getElementById('editor-book-title');
   const editStatusEl = document.getElementById('editor-status-text');
 
   const btnBack = document.getElementById('reader-btn-back');
   const btnTts = document.getElementById('reader-btn-tts');
+  const ttsLabel = document.getElementById('reader-tts-label');
   const btnEdit = document.getElementById('reader-btn-edit');
   const btnAa = document.getElementById('reader-btn-aa');
   const btnSearch = document.getElementById('reader-btn-search');
+  const btnMore = document.getElementById('reader-btn-more');
+  const moreDropdown = document.getElementById('reader-more-dropdown');
   const btnBookmark = document.getElementById('reader-btn-bookmark');
+  const bookmarkLabel = document.getElementById('reader-bookmark-label');
 
   const aaBackdrop = document.getElementById('aa-sheet-backdrop');
   const aaSheet = document.getElementById('aa-sheet');
@@ -105,12 +110,38 @@ export function createReaderController({
     updateTtsButton();
   }
 
+  function closeMoreMenu() {
+    moreDropdown?.classList.add('hidden');
+    btnMore?.classList.remove('active');
+  }
+
+  function updateReaderSubtitle() {
+    if (!currentBook || !subEl) return;
+    const pct = Math.max(0, Math.min(100, Math.round(currentBook.progressPercent || 0)));
+    const titleTrim = (currentBook.title || '').trim().toLowerCase();
+    const g = (currentBook.groupName || '').trim();
+    const s = (currentBook.subtitle || '').trim();
+    const prefix = (g && g.toLowerCase() !== titleTrim)
+      ? g
+      : (s && s.toLowerCase() !== titleTrim ? s : '');
+    subEl.textContent = prefix ? `${prefix} · ${pct}% đã đọc` : `${pct}% đã đọc`;
+  }
+
+  function updateBookmarkUi() {
+    const marked = Boolean(currentBook?.isFavorite);
+    btnBookmark.classList.toggle('is-bookmarked', marked);
+    const svg = btnBookmark.querySelector('svg');
+    if (svg) svg.setAttribute('fill', marked ? 'currentColor' : 'none');
+    if (bookmarkLabel) bookmarkLabel.textContent = marked ? 'Đã đánh dấu trang' : 'Đánh dấu trang';
+  }
+
   function updateTtsButton() {
     const s = getSettings();
     const show = Boolean(s.readAloudEnabled && currentBook && currentBook.kind !== 'pdf' && !isEditing);
     btnTts.classList.toggle('hidden', !show);
     btnTts.classList.toggle('active', isSpeaking);
-    btnTts.setAttribute('aria-label', isSpeaking ? 'Dừng đọc to' : 'Đọc to');
+    btnTts.setAttribute('aria-label', isSpeaking ? 'Dừng đọc to' : 'Đọc to tài liệu');
+    if (ttsLabel) ttsLabel.textContent = isSpeaking ? 'Dừng đọc to' : 'Đọc to tài liệu';
   }
 
   function toggleTts() {
@@ -298,6 +329,7 @@ export function createReaderController({
       currentChapterTitle: chapter || currentBook.currentChapterTitle,
       lastOpenedAt: Date.now()
     };
+    updateReaderSubtitle();
     await onUpdateBook(currentBook);
   }
 
@@ -420,6 +452,8 @@ export function createReaderController({
       const doc = iframe.contentDocument;
       const win = iframe.contentWindow;
       if (!doc || !win) return;
+
+      doc.addEventListener('pointerdown', closeMoreMenu);
 
       const docxCount = doc.querySelectorAll('.docx-page').length;
       if (docxCount > 0) {
@@ -855,20 +889,51 @@ export function createReaderController({
 
   // Event bindings
   btnBack.addEventListener('click', close);
-  btnTts.addEventListener('click', toggleTts);
-  btnEdit.addEventListener('click', enterEditMode);
+  btnMore?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = moreDropdown.classList.contains('hidden');
+    if (willOpen) {
+      aaBackdrop.classList.add('hidden');
+      searchOverlay.classList.add('hidden');
+      moreDropdown.classList.remove('hidden');
+      btnMore.classList.add('active');
+    } else {
+      closeMoreMenu();
+    }
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (!moreDropdown || moreDropdown.classList.contains('hidden')) return;
+    if (!e.target.closest('#reader-more-dropdown') && !e.target.closest('#reader-btn-more')) {
+      closeMoreMenu();
+    }
+  });
+
+  btnTts.addEventListener('click', () => {
+    closeMoreMenu();
+    toggleTts();
+  });
+  btnEdit.addEventListener('click', () => {
+    closeMoreMenu();
+    enterEditMode();
+  });
   btnAa.addEventListener('click', () => {
+    closeMoreMenu();
     syncAaSheetControls();
     aaBackdrop.classList.toggle('hidden');
+    btnAa.classList.toggle('active', !aaBackdrop.classList.contains('hidden'));
     updatePageNavUi();
   });
   aaBackdrop.addEventListener('click', (e) => {
     if (e.target === aaBackdrop || e.target.closest('#aa-btn-close')) {
       aaBackdrop.classList.add('hidden');
+      btnAa.classList.remove('active');
       updatePageNavUi();
     }
   });
   btnSearch.addEventListener('click', () => {
+    closeMoreMenu();
+    aaBackdrop.classList.add('hidden');
+    btnAa.classList.remove('active');
     searchOverlay.classList.toggle('hidden');
     if (!searchOverlay.classList.contains('hidden')) {
       runSearch(searchInput.value);
@@ -885,7 +950,8 @@ export function createReaderController({
   btnBookmark.addEventListener('click', async () => {
     if (!currentBook) return;
     currentBook = { ...currentBook, isFavorite: !currentBook.isFavorite };
-    btnBookmark.classList.toggle('active', currentBook.isFavorite);
+    updateBookmarkUi();
+    closeMoreMenu();
     await onUpdateBook(currentBook);
   });
 
@@ -995,14 +1061,17 @@ export function createReaderController({
     activeIframe = null;
 
     titleEl.textContent = book.title;
-    btnBookmark.classList.toggle('active', Boolean(book.isFavorite));
+    updateReaderSubtitle();
+    updateBookmarkUi();
     btnEdit.classList.toggle('hidden', book.kind === 'pdf');
     btnSearch.classList.toggle('hidden', book.kind === 'pdf');
     topBarRead.classList.remove('hidden');
     topBarEdit.classList.add('hidden');
     editorRibbon.classList.add('hidden');
     aaBackdrop.classList.add('hidden');
+    btnAa.classList.remove('active');
     searchOverlay.classList.add('hidden');
+    closeMoreMenu();
 
     overlay.classList.remove('hidden');
     requestWakeLock();
