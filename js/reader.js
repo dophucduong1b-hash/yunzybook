@@ -35,7 +35,6 @@ export function createReaderController({
 }) {
   const overlay = document.getElementById('reader-overlay');
   const stageEl = document.getElementById('reader-stage');
-  const brightnessOverlay = document.getElementById('reader-brightness-overlay');
   const topBarRead = document.getElementById('reader-topbar-read');
   const topBarEdit = document.getElementById('reader-topbar-edit');
   const titleEl = document.getElementById('reader-book-title');
@@ -189,11 +188,6 @@ export function createReaderController({
     if (!currentBook) return;
     const s = getSettings();
     const effTheme = resolveEffectiveTheme(s);
-
-    // Brightness dimmer scrim (only apply night dimming below 72% so default stays crystal bright)
-    const br = Number(s.brightness ?? 0.72);
-    const dim = br < 0.72 ? Math.max(0, Math.min(0.62, (0.72 - br) * 0.92)) : 0;
-    brightnessOverlay.style.background = dim > 0 ? `rgba(0, 0, 0, ${dim.toFixed(3)})` : 'transparent';
 
     const bgMap = {
       ORIGINAL: '#FFFFFF',
@@ -881,10 +875,6 @@ export function createReaderController({
     aaSheet.querySelectorAll('[data-pagemode]').forEach((b) => b.classList.toggle('selected', b.dataset.pagemode === s.pageMode));
     const sizeVal = document.getElementById('aa-font-size-val');
     if (sizeVal) sizeVal.textContent = `${s.fontSizePt}pt`;
-    const brSlider = document.getElementById('aa-brightness-slider');
-    const brVal = document.getElementById('aa-brightness-val');
-    if (brSlider) brSlider.value = String(Math.round(s.brightness * 100));
-    if (brVal) brVal.textContent = `${Math.round(s.brightness * 100)}%`;
   }
 
   // Event bindings
@@ -998,13 +988,6 @@ export function createReaderController({
     } else {
       return;
     }
-    syncAaSheetControls();
-    applyAppearance();
-  });
-
-  document.getElementById('aa-brightness-slider').addEventListener('input', async (e) => {
-    const val = Math.max(15, Math.min(100, Number(e.target.value))) / 100;
-    await onUpdateSettings({ ...getSettings(), brightness: val });
     syncAaSheetControls();
     applyAppearance();
   });
