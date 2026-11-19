@@ -94,6 +94,7 @@ function applyGlobalVisualTheme() {
   if (themeMeta) {
     themeMeta.setAttribute('content', mode === 'dark' ? '#10141F' : mode === 'sepia' ? '#F2EBE0' : '#F4F6FB');
   }
+  try { window.AndroidBridge?.setSystemBarStyle?.(mode === 'dark'); } catch (_) {}
 }
 
 async function updateSettings(next) {
@@ -935,8 +936,9 @@ function showIosInstallModalIfFirstVisit() {
 
 async function bootstrap() {
   syncSafeAreaMetrics();
+  const isAndroidNative = Boolean(window.AndroidBridge);
 
-  if ('serviceWorker' in navigator) {
+  if (!isAndroidNative && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch(() => {});
   }
 
@@ -945,6 +947,13 @@ async function bootstrap() {
   groups = await loadGroups();
 
   applyGlobalVisualTheme();
+
+  if (isAndroidNative) {
+    document.getElementById('set-row-ios-install')?.classList.add('hidden');
+    document.getElementById('ios-install-banner')?.classList.add('hidden');
+    const verEl = document.getElementById('set-app-version');
+    if (verEl) verEl.textContent = 'v1.6.1 · Android ngoại tuyến';
+  }
 
   try {
     const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -969,7 +978,52 @@ async function bootstrap() {
   initCreateHtmlModal();
   initTouchAndLongPressGestures();
   scrubThirdPartyBanners();
-  showIosInstallModalIfFirstVisit();
+  if (!isAndroidNative) {
+    showIosInstallModalIfFirstVisit();
+  }
+
+  window.__yunzyHandleBack = () => {
+    const inputModal = document.getElementById('input-dialog-modal');
+    if (inputModal && !inputModal.classList.contains('hidden')) {
+      document.getElementById('input-dialog-cancel')?.click();
+      return 'handled';
+    }
+    const confirmModal = document.getElementById('confirm-dialog-modal');
+    if (confirmModal && !confirmModal.classList.contains('hidden')) {
+      document.getElementById('confirm-dialog-cancel')?.click();
+      return 'handled';
+    }
+    const simpleClosers = [
+      ['group-picker-modal', 'group-picker-close'],
+      ['cover-editor-modal', 'cover-ed-close']
+    ];
+    for (const [modalId, closeId] of simpleClosers) {
+      const modal = document.getElementById(modalId);
+      if (modal && !modal.classList.contains('hidden')) {
+        document.getElementById(closeId)?.click();
+        return 'handled';
+      }
+    }
+    const hiddenIds = [
+      'add-menu-popover',
+      'create-html-modal',
+      'book-action-modal',
+      'ios-guide-modal'
+    ];
+    for (const id of hiddenIds) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('hidden')) {
+        el.classList.add('hidden');
+        return 'handled';
+      }
+    }
+    if (reader.handleHardwareBack()) return 'handled';
+    if (activeTab !== 'library') {
+      switchTab('library');
+      return 'handled';
+    }
+    return 'exit';
+  };
 
   // Taskbar tab clicks & consume all touches so underlying book covers never receive them
   const taskbarEl = document.getElementById('liquid-taskbar');

@@ -30,7 +30,7 @@ const LINE_SPACING_MAP = {
 let safeProbeEl = null;
 
 export function syncSafeAreaMetrics() {
-  if (typeof document === 'undefined') return 8;
+  if (typeof document === 'undefined') return 0;
   if (!safeProbeEl) {
     safeProbeEl = document.createElement('div');
     safeProbeEl.id = '__yunzy_safe_probe';
@@ -38,15 +38,7 @@ export function syncSafeAreaMetrics() {
       'position:fixed;top:0;left:0;width:0;height:0;padding-top:var(--safe-top, env(safe-area-inset-top, 0px));visibility:hidden;pointer-events:none;z-index:-1;';
     (document.body || document.documentElement).appendChild(safeProbeEl);
   }
-  const safeTop = parseFloat(getComputedStyle(safeProbeEl).paddingTop) || 0;
-  let dockTop = 8;
-  if (safeTop >= 40) {
-    dockTop = Math.max(8, Math.round(safeTop - 7));
-  } else if (safeTop > 0) {
-    dockTop = Math.round(safeTop + 4);
-  }
-  document.documentElement.style.setProperty('--reader-dock-top', `${dockTop}px`);
-  return dockTop;
+  return parseFloat(getComputedStyle(safeProbeEl).paddingTop) || 0;
 }
 
 export function createReaderController({
@@ -70,6 +62,7 @@ export function createReaderController({
   const editStatusEl = document.getElementById('editor-status-text');
 
   const btnBack = document.getElementById('reader-btn-back');
+  const btnFloatingBack = document.getElementById('reader-floating-back');
   const btnTts = document.getElementById('reader-btn-tts');
   const ttsLabel = document.getElementById('reader-tts-label');
   const btnEdit = document.getElementById('reader-btn-edit');
@@ -152,6 +145,7 @@ export function createReaderController({
     dockHidden = canHide ? Boolean(hidden) : false;
     topBarRead?.classList.toggle('dock-hidden', dockHidden);
     overlay?.classList.toggle('reader-immersive', dockHidden);
+    btnFloatingBack?.classList.toggle('visible', dockHidden && !isEditing);
   }
 
   function trimPdfCanvases(centerPage, keepRadius = 3) {
@@ -194,13 +188,16 @@ export function createReaderController({
   }
 
   async function requestWakeLock() {
-    if (!getSettings().keepScreenOn || !navigator.wakeLock) return;
+    const keepOn = Boolean(getSettings().keepScreenOn);
+    try { window.AndroidBridge?.setKeepScreenOn?.(keepOn); } catch (_) {}
+    if (!keepOn || !navigator.wakeLock) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
     } catch (_) {}
   }
 
   function releaseWakeLock() {
+    try { window.AndroidBridge?.setKeepScreenOn?.(false); } catch (_) {}
     if (wakeLock) {
       wakeLock.release().catch(() => {});
       wakeLock = null;
@@ -310,6 +307,7 @@ export function createReaderController({
     if (themeMeta) {
       themeMeta.setAttribute('content', readerBg);
     }
+    try { window.AndroidBridge?.setSystemBarStyle?.(effTheme === 'DARK'); } catch (_) {}
 
     updateTtsButton();
     updatePageNavUi();
@@ -337,9 +335,8 @@ export function createReaderController({
       doc.head.appendChild(padStyle);
     }
     const zoomScale = (s.fontSizePt / 17).toFixed(3);
-    const dockTopPx =
-      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--reader-dock-top')) || 8;
-    const topPad = Math.ceil(dockTopPx + 44 + 8);
+    const safeTop = syncSafeAreaMetrics();
+    const topPad = Math.max(84, Math.ceil(safeTop + 80));
     const botPad = isEditing ? 108 : 88;
     padStyle.textContent = `
       html, body { height: auto !important; min-height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch !important; }
@@ -1187,6 +1184,7 @@ export function createReaderController({
 
   // Event bindings
   btnBack.addEventListener('click', close);
+  btnFloatingBack?.addEventListener('click', close);
   btnMore?.addEventListener('click', (e) => {
     e.stopPropagation();
     const willOpen = moreDropdown.classList.contains('hidden');
@@ -1417,9 +1415,39 @@ export function createReaderController({
     onCloseReader();
   }
 
+  function handleHardwareBack() {
+    if (!currentBook || overlay.classList.contains('hidden')) return false;
+    if (!moreDropdown.classList.contains('hidden')) {
+      closeMoreMenu();
+      return true;
+    }
+    if (!editMenuEl.classList.contains('hidden')) {
+      editMenuEl.classList.add('hidden');
+      return true;
+    }
+    if (!searchOverlay.classList.contains('hidden')) {
+      searchOverlay.classList.add('hidden');
+      updatePageNavUi();
+      return true;
+    }
+    if (!aaBackdrop.classList.contains('hidden')) {
+      aaBackdrop.classList.add('hidden');
+      btnAa.classList.remove('active');
+      updatePageNavUi();
+      return true;
+    }
+    if (isEditing) {
+      exitEditMode();
+      return true;
+    }
+    close();
+    return true;
+  }
+
   return {
     open,
     close,
-    applyAppearance
+    applyAppearance,
+    handleHardwareBack
   };
 }

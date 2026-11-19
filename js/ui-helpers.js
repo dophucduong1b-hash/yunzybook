@@ -120,6 +120,17 @@ export function normalizeAppTheme(appThemeMode) {
 
 export function downloadBlob(blobOrBytes, filename, mimeType) {
   const blob = blobOrBytes instanceof Blob ? blobOrBytes : new Blob([blobOrBytes], { type: mimeType });
+  if (typeof window !== 'undefined' && window.AndroidBridge && typeof window.AndroidBridge.saveFileBase64 === 'function') {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const raw = String(fr.result || '');
+      const commaIdx = raw.indexOf(',');
+      const b64 = commaIdx >= 0 ? raw.slice(commaIdx + 1) : raw;
+      window.AndroidBridge.saveFileBase64(b64, filename, mimeType || blob.type || 'application/octet-stream');
+    };
+    fr.readAsDataURL(blob);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

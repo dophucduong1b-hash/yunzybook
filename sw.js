@@ -1,4 +1,4 @@
-const CACHE_NAME = 'yunzybook-pwa-v1.6.0';
+const CACHE_NAME = 'yunzybook-pwa-v1.6.1';
 
 const PRECACHE_URLS = [
   './',
