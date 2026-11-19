@@ -110,6 +110,118 @@ export function isIosSafari() {
   return { isIos, isStandalone };
 }
 
+let hapticEnabledState = true;
+let lastHapticAt = 0;
+let hapticSwitchLabel = null;
+let hapticTimers = [];
+
+function ensureIosHapticHost() {
+  if (typeof document === 'undefined' || !document.body) return null;
+  if (hapticSwitchLabel && hapticSwitchLabel.isConnected) return hapticSwitchLabel;
+
+  let host = document.getElementById('yunzy-haptic-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'yunzy-haptic-host';
+    host.setAttribute('aria-hidden', 'true');
+    // Must stay in render tree (no display:none / visibility:hidden) and fixed at 0,0 to prevent scroll jumps
+    host.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;z-index:-1;';
+    host.addEventListener('click', (e) => e.stopPropagation());
+
+    const input = document.createElement('input');
+    input.id = 'yunzy-haptic-switch';
+    input.type = 'checkbox';
+    input.tabIndex = -1;
+    input.setAttribute('switch', '');
+    input.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;margin:0;padding:0;';
+
+    const label = document.createElement('label');
+    label.id = 'yunzy-haptic-label';
+    label.htmlFor = 'yunzy-haptic-switch';
+    label.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;margin:0;padding:0;';
+
+    host.appendChild(input);
+    host.appendChild(label);
+    document.body.appendChild(host);
+    hapticSwitchLabel = label;
+  } else {
+    hapticSwitchLabel = document.getElementById('yunzy-haptic-label');
+  }
+  return hapticSwitchLabel;
+}
+
+function pulseIosSwitch() {
+  try {
+    const label = ensureIosHapticHost();
+    if (label) label.click();
+  } catch (_) {}
+}
+
+function clearPendingHapticTimers() {
+  for (const id of hapticTimers) clearTimeout(id);
+  hapticTimers = [];
+}
+
+export function setHapticEnabled(enabled) {
+  hapticEnabledState = Boolean(enabled);
+  if (!hapticEnabledState) clearPendingHapticTimers();
+}
+
+export function initHaptics(enabled = true) {
+  hapticEnabledState = Boolean(enabled);
+  if (typeof window === 'undefined') return;
+  if (isIosSafari().isIos) {
+    ensureIosHapticHost();
+  }
+}
+
+export function triggerHaptic(style = 'light') {
+  if (!hapticEnabledState || typeof window === 'undefined') return;
+  const now = Date.now();
+  if (now - lastHapticAt < 28) return;
+  lastHapticAt = now;
+
+  // Priority 1: Native Android WebView bridge
+  if (typeof window.AndroidBridge?.haptic === 'function') {
+    try {
+      window.AndroidBridge.haptic(style);
+    } catch (_) {}
+    return;
+  }
+
+  // Priority 2: iOS 17.4+ / 18+ WebKit native switch Taptic Engine
+  if (isIosSafari().isIos) {
+    clearPendingHapticTimers();
+    pulseIosSwitch();
+    if (style === 'success') {
+      hapticTimers.push(setTimeout(pulseIosSwitch, 85));
+    } else if (style === 'warning' || style === 'error') {
+      hapticTimers.push(setTimeout(pulseIosSwitch, 85));
+      hapticTimers.push(setTimeout(pulseIosSwitch, 170));
+    }
+    return;
+  }
+
+  // Priority 3: Standard Vibration API fallback (Android Chrome / mobile web)
+  if (typeof navigator?.vibrate === 'function') {
+    const patternMap = {
+      selection: 6,
+      light: 9,
+      medium: 14,
+      heavy: 24,
+      success: [10, 35, 16],
+      warning: [14, 30, 12],
+      error: [18, 30, 18, 30, 22]
+    };
+    try {
+      navigator.vibrate(patternMap[style] ?? 9);
+    } catch (_) {}
+  }
+}
+
 export function normalizeAppTheme(appThemeMode) {
   const sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   if (appThemeMode === 'Tối') return 'dark';

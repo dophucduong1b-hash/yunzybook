@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   readAloudEnabled: false,
   keepScreenOn: true,
   tapEdgeToTurnPage: false,
+  hapticEnabled: true,
   glassOpacity: 0.72
 };
 

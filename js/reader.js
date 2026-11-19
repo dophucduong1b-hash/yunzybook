@@ -1,5 +1,5 @@
 import { buildDocxBytesFromPages, renderDocxPagesToHtml } from './docx.js';
-import { downloadBlob, escapeAttr, normalizeAppTheme } from './ui-helpers.js';
+import { downloadBlob, escapeAttr, normalizeAppTheme, triggerHaptic } from './ui-helpers.js';
 
 export const SESSION_STORAGE_KEY = 'yunzy_reading_session';
 
@@ -689,6 +689,7 @@ export function createReaderController({
         if (win.getComputedStyle(target).cursor === 'pointer') {
           return;
         }
+        triggerHaptic('light');
         setDockHidden(!dockHidden);
       });
 
@@ -1183,10 +1184,15 @@ export function createReaderController({
   });
 
   // Event bindings
-  btnBack.addEventListener('click', close);
-  btnFloatingBack?.addEventListener('click', close);
+  const closeWithHaptic = () => {
+    triggerHaptic('light');
+    close();
+  };
+  btnBack.addEventListener('click', closeWithHaptic);
+  btnFloatingBack?.addEventListener('click', closeWithHaptic);
   btnMore?.addEventListener('click', (e) => {
     e.stopPropagation();
+    triggerHaptic('light');
     const willOpen = moreDropdown.classList.contains('hidden');
     if (willOpen) {
       aaBackdrop.classList.add('hidden');
@@ -1207,14 +1213,17 @@ export function createReaderController({
   });
 
   btnTts.addEventListener('click', () => {
+    triggerHaptic('light');
     closeMoreMenu();
     toggleTts();
   });
   btnEdit.addEventListener('click', () => {
+    triggerHaptic('light');
     closeMoreMenu();
     enterEditMode();
   });
   btnAa.addEventListener('click', () => {
+    triggerHaptic('light');
     closeMoreMenu();
     syncAaSheetControls();
     aaBackdrop.classList.toggle('hidden');
@@ -1224,12 +1233,14 @@ export function createReaderController({
   });
   aaBackdrop.addEventListener('click', (e) => {
     if (e.target === aaBackdrop || e.target.closest('#aa-btn-close')) {
+      if (e.target.closest('#aa-btn-close')) triggerHaptic('light');
       aaBackdrop.classList.add('hidden');
       btnAa.classList.remove('active');
       updatePageNavUi();
     }
   });
   btnSearch.addEventListener('click', () => {
+    triggerHaptic('light');
     closeMoreMenu();
     aaBackdrop.classList.add('hidden');
     btnAa.classList.remove('active');
@@ -1242,6 +1253,7 @@ export function createReaderController({
     updatePageNavUi();
   });
   document.getElementById('reader-search-close').addEventListener('click', () => {
+    triggerHaptic('light');
     searchOverlay.classList.add('hidden');
     updatePageNavUi();
   });
@@ -1250,16 +1262,17 @@ export function createReaderController({
   btnBookmark.addEventListener('click', async () => {
     if (!currentBook) return;
     const nextFav = !currentBook.isFavorite;
+    triggerHaptic(nextFav ? 'success' : 'light');
     currentBook = { ...currentBook, isFavorite: nextFav };
     updateBookmarkUi();
     closeMoreMenu();
     await onUpdateBookMeta(currentBook.id, { isFavorite: nextFav });
   });
 
-  pageNavPrev.addEventListener('click', () => goToPage(currentPage - 1));
-  pageNavNext.addEventListener('click', () => goToPage(currentPage + 1));
-  edgeLeft.addEventListener('click', () => goToPage(currentPage - 1));
-  edgeRight.addEventListener('click', () => goToPage(currentPage + 1));
+  pageNavPrev.addEventListener('click', () => { triggerHaptic('light'); goToPage(currentPage - 1); });
+  pageNavNext.addEventListener('click', () => { triggerHaptic('light'); goToPage(currentPage + 1); });
+  edgeLeft.addEventListener('click', () => { triggerHaptic('light'); goToPage(currentPage - 1); });
+  edgeRight.addEventListener('click', () => { triggerHaptic('light'); goToPage(currentPage + 1); });
 
   // Aa Sheet controls
   aaSheet.addEventListener('click', async (e) => {
@@ -1267,6 +1280,12 @@ export function createReaderController({
     const fontBtn = e.target.closest('[data-font]');
     const spBtn = e.target.closest('[data-spacing]');
     const pmBtn = e.target.closest('[data-pagemode]');
+    const minusBtn = e.target.closest('#aa-font-minus');
+    const plusBtn = e.target.closest('#aa-font-plus');
+    const resetBtn = e.target.closest('#aa-btn-reset');
+    if (!themeBtn && !fontBtn && !spBtn && !pmBtn && !minusBtn && !plusBtn && !resetBtn) return;
+
+    triggerHaptic('selection');
     const cur = getSettings();
 
     if (themeBtn) {
@@ -1282,11 +1301,11 @@ export function createReaderController({
         if (nextMode === 'PAGINATED') await renderPdfPaginatedPage(currentPage);
         else await renderPdfScrollMode();
       }
-    } else if (e.target.closest('#aa-font-minus')) {
+    } else if (minusBtn) {
       await onUpdateSettings({ ...cur, fontSizePt: Math.max(12, cur.fontSizePt - 1) });
-    } else if (e.target.closest('#aa-font-plus')) {
+    } else if (plusBtn) {
       await onUpdateSettings({ ...cur, fontSizePt: Math.min(28, cur.fontSizePt + 1) });
-    } else if (e.target.closest('#aa-btn-reset')) {
+    } else if (resetBtn) {
       await onUpdateSettings({
         ...cur,
         themeMode: 'ORIGINAL',
@@ -1296,30 +1315,44 @@ export function createReaderController({
         pageMode: 'SCROLL'
       });
       if (currentBook?.kind === 'pdf') await renderPdfScrollMode();
-    } else {
-      return;
     }
     syncAaSheetControls();
     applyAppearance();
   });
 
   // Editor Top bar & Formatting Ribbon
-  document.getElementById('editor-btn-close').addEventListener('click', exitEditMode);
-  document.getElementById('editor-btn-undo').addEventListener('click', () => restoreRangeAndExec('undo'));
-  document.getElementById('editor-btn-redo').addEventListener('click', () => restoreRangeAndExec('redo'));
-  document.getElementById('editor-btn-save').addEventListener('click', saveDirect);
+  document.getElementById('editor-btn-close').addEventListener('click', () => {
+    triggerHaptic('light');
+    exitEditMode();
+  });
+  document.getElementById('editor-btn-undo').addEventListener('click', () => {
+    triggerHaptic('selection');
+    restoreRangeAndExec('undo');
+  });
+  document.getElementById('editor-btn-redo').addEventListener('click', () => {
+    triggerHaptic('selection');
+    restoreRangeAndExec('redo');
+  });
+  document.getElementById('editor-btn-save').addEventListener('click', () => {
+    triggerHaptic('success');
+    saveDirect();
+  });
   document.getElementById('editor-btn-more').addEventListener('click', () => {
+    triggerHaptic('light');
     editMenuEl.classList.toggle('hidden');
   });
   document.getElementById('editor-opt-save-direct').addEventListener('click', () => {
+    triggerHaptic('success');
     editMenuEl.classList.add('hidden');
     saveDirect();
   });
   document.getElementById('editor-opt-save-copy').addEventListener('click', () => {
+    triggerHaptic('success');
     editMenuEl.classList.add('hidden');
     saveCopyToLibrary();
   });
   document.getElementById('editor-opt-export-docx').addEventListener('click', () => {
+    triggerHaptic('success');
     editMenuEl.classList.add('hidden');
     exportDocxCopy();
   });
@@ -1332,6 +1365,8 @@ export function createReaderController({
     const cmdBtn = e.target.closest('[data-cmd]');
     const blockBtn = e.target.closest('[data-block]');
     const actionBtn = e.target.closest('[data-action]');
+    if (!cmdBtn && !blockBtn && !actionBtn) return;
+    triggerHaptic('selection');
     if (cmdBtn) {
       restoreRangeAndExec(cmdBtn.dataset.cmd);
     } else if (blockBtn) {

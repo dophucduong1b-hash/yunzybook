@@ -29,9 +29,12 @@ import {
   extractHtmlTitle,
   formatBytesMb,
   hashColorIndex,
+  initHaptics,
   isIosSafari,
   normalizeAppTheme,
-  renderCoverMarkup
+  renderCoverMarkup,
+  setHapticEnabled,
+  triggerHaptic
 } from './ui-helpers.js';
 import { unzipBytes, zipEntries } from './zip.js';
 
@@ -99,6 +102,7 @@ function applyGlobalVisualTheme() {
 
 async function updateSettings(next) {
   settings = await saveSettings(next);
+  setHapticEnabled(settings.hapticEnabled !== false);
   applyGlobalVisualTheme();
   renderSettingsTab();
 }
@@ -126,8 +130,8 @@ function openInputModal({ title, value = '', placeholder = '' }) {
       field.removeEventListener('keydown', onKey);
       resolve(res);
     };
-    const onOk = () => cleanup(field.value);
-    const onCancel = () => cleanup(null);
+    const onOk = () => { triggerHaptic('light'); cleanup(field.value); };
+    const onCancel = () => { triggerHaptic('light'); cleanup(null); };
     const onBackdrop = (e) => { if (e.target === modal) cleanup(null); };
     const onKey = (e) => {
       if (e.key === 'Enter') onOk();
@@ -161,8 +165,8 @@ function openConfirmModal({ title, message, okLabel = 'Xóa', danger = true }) {
       modal.removeEventListener('click', onBackdrop);
       resolve(res);
     };
-    const onOk = () => cleanup(true);
-    const onCancel = () => cleanup(false);
+    const onOk = () => { triggerHaptic(danger ? 'medium' : 'light'); cleanup(true); };
+    const onCancel = () => { triggerHaptic('light'); cleanup(false); };
     const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
     btnOk.addEventListener('click', onOk);
     btnCancel.addEventListener('click', onCancel);
@@ -214,11 +218,15 @@ function openGroupPickerModal(book) {
   };
   const onPick = (e) => {
     const btn = e.target.closest('[data-pick-group]');
-    if (btn) applyGroup(btn.dataset.pickGroup);
+    if (btn) {
+      triggerHaptic('selection');
+      applyGroup(btn.dataset.pickGroup);
+    }
   };
   const onAddNew = async () => {
     const clean = newInput.value.trim();
     if (!clean) return;
+    triggerHaptic('light');
     if (!groups.some((g) => g.toLowerCase() === clean.toLowerCase())) {
       groups.push(clean);
       await saveGroups(groups);
@@ -226,10 +234,14 @@ function openGroupPickerModal(book) {
     await applyGroup(clean);
   };
   const onBackdrop = (e) => { if (e.target === modal) closeModal(); };
+  const onCloseBtn = () => {
+    triggerHaptic('light');
+    closeModal();
+  };
 
   listEl.addEventListener('click', onPick);
   newBtn.addEventListener('click', onAddNew);
-  closeBtn.addEventListener('click', closeModal);
+  closeBtn.addEventListener('click', onCloseBtn);
   modal.addEventListener('click', onBackdrop);
 }
 
@@ -267,18 +279,24 @@ function openCoverEditorModal(book) {
     gridEl.removeEventListener('click', onSelectStyle);
     pickImgBtn.removeEventListener('click', onPickImage);
     saveBtn.removeEventListener('click', onSave);
-    cancelBtn.removeEventListener('click', closeModal);
-    closeBtn.removeEventListener('click', closeModal);
+    cancelBtn.removeEventListener('click', onCancelOrClose);
+    closeBtn.removeEventListener('click', onCancelOrClose);
     modal.removeEventListener('click', onBackdrop);
+  };
+  const onCancelOrClose = () => {
+    triggerHaptic('light');
+    closeModal();
   };
   const onSelectStyle = (e) => {
     const tile = e.target.closest('[data-cstyle]');
     if (!tile) return;
+    triggerHaptic('selection');
     selectedIdx = Number(tile.dataset.cstyle);
     useCustom = false;
     renderPreviewAndGrid();
   };
   const onPickImage = () => {
+    triggerHaptic('light');
     pendingCoverBookId = book.id;
     closeModal();
     const coverInput = document.getElementById('cover-pick-input');
@@ -286,6 +304,7 @@ function openCoverEditorModal(book) {
     coverInput.click();
   };
   const onSave = async () => {
+    triggerHaptic('success');
     await updateBookMeta(book.id, {
       coverColorIndex: selectedIdx,
       customCoverDataUrl: useCustom ? book.customCoverDataUrl : null
@@ -300,8 +319,8 @@ function openCoverEditorModal(book) {
   gridEl.addEventListener('click', onSelectStyle);
   pickImgBtn.addEventListener('click', onPickImage);
   saveBtn.addEventListener('click', onSave);
-  cancelBtn.addEventListener('click', closeModal);
-  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', onCancelOrClose);
+  closeBtn.addEventListener('click', onCancelOrClose);
   modal.addEventListener('click', onBackdrop);
 }
 
@@ -558,6 +577,8 @@ function renderSettingsTab() {
   document.getElementById('set-toggle-tts').checked = Boolean(settings.readAloudEnabled);
   document.getElementById('set-toggle-keep-on').checked = Boolean(settings.keepScreenOn);
   document.getElementById('set-toggle-tap-edge').checked = Boolean(settings.tapEdgeToTurnPage);
+  const hapticToggle = document.getElementById('set-toggle-haptic');
+  if (hapticToggle) hapticToggle.checked = settings.hapticEnabled !== false;
 
   const opSlider = document.getElementById('set-glass-opacity-slider');
   const opVal = document.getElementById('set-glass-opacity-val');
@@ -588,6 +609,7 @@ function renderAllTabs() {
 
 function switchTab(nextTab) {
   if (nextTab === activeTab) return;
+  triggerHaptic('selection');
   const prevIdx = TAB_ORDER.indexOf(activeTab);
   const nextIdx = TAB_ORDER.indexOf(nextTab);
   const animClass = nextIdx >= prevIdx ? 'anim-right' : 'anim-left';
@@ -798,17 +820,23 @@ function initCreateHtmlModal() {
   swatchRow.addEventListener('click', (e) => {
     const dot = e.target.closest('[data-cidx]');
     if (!dot) return;
+    triggerHaptic('selection');
     selectedColorIdx = Number(dot.dataset.cidx);
     swatchRow.querySelectorAll('.color-dot').forEach((d, idx) => d.classList.toggle('selected', idx === selectedColorIdx));
   });
 
-  document.getElementById('create-html-cancel').addEventListener('click', () => modal.classList.add('hidden'));
+  document.getElementById('create-html-cancel').addEventListener('click', () => {
+    triggerHaptic('light');
+    modal.classList.add('hidden');
+  });
   document.getElementById('create-html-save').addEventListener('click', async () => {
     const raw = codeInput.value.trim();
     if (!raw) {
+      triggerHaptic('warning');
       showToast('Hãy dán mã HTML trước khi lưu');
       return;
     }
+    triggerHaptic('success');
     const cleanTitle = titleInput.value.trim() || extractHtmlTitle(raw, 'Tài liệu HTML mới');
     const htmlContent = /<html/i.test(raw)
       ? raw
@@ -875,7 +903,7 @@ function initTouchAndLongPressGestures() {
         holdTimer = null;
         lastLongPressAt = Date.now();
         clearPressed();
-        try { navigator.vibrate?.(16); } catch (_) {}
+        triggerHaptic('heavy');
         const b = books.find((x) => x.id === tile.dataset.bookId);
         if (b) openBookActionModal(b);
       }, 430);
@@ -943,6 +971,7 @@ async function bootstrap() {
   }
 
   settings = await loadSettings();
+  initHaptics(settings.hapticEnabled !== false);
   books = await loadAllBooks();
   groups = await loadGroups();
 
@@ -952,7 +981,7 @@ async function bootstrap() {
     document.getElementById('set-row-ios-install')?.classList.add('hidden');
     document.getElementById('ios-install-banner')?.classList.add('hidden');
     const verEl = document.getElementById('set-app-version');
-    if (verEl) verEl.textContent = 'v1.6.1 · Android ngoại tuyến';
+    if (verEl) verEl.textContent = 'v1.6.2 · Android ngoại tuyến';
   }
 
   try {
@@ -1046,6 +1075,7 @@ async function bootstrap() {
     renderLibraryTab();
   });
   document.getElementById('library-search-clear')?.addEventListener('click', () => {
+    triggerHaptic('light');
     searchQuery = '';
     searchInput.value = '';
     renderLibraryTab();
@@ -1053,6 +1083,7 @@ async function bootstrap() {
   document.getElementById('library-filter-row').addEventListener('click', (e) => {
     const pill = e.target.closest('[data-filter]');
     if (!pill) return;
+    triggerHaptic('selection');
     selectedFilter = pill.dataset.filter;
     renderLibraryTab();
   });
@@ -1063,18 +1094,23 @@ async function bootstrap() {
   const backupInput = document.getElementById('backup-restore-input');
   const coverInput = document.getElementById('cover-pick-input');
 
-  const toggleAddPopover = () => addPopover.classList.toggle('hidden');
+  const toggleAddPopover = () => {
+    triggerHaptic('light');
+    addPopover.classList.toggle('hidden');
+  };
   document.getElementById('btn-add-top').addEventListener('click', toggleAddPopover);
   document.getElementById('btn-add-empty').addEventListener('click', toggleAddPopover);
   addPopover.addEventListener('click', (e) => {
     if (e.target === addPopover) addPopover.classList.add('hidden');
   });
   document.getElementById('add-opt-pick-file').addEventListener('click', () => {
+    triggerHaptic('light');
     addPopover.classList.add('hidden');
     fileInput.value = '';
     fileInput.click();
   });
   document.getElementById('add-opt-create-html').addEventListener('click', () => {
+    triggerHaptic('light');
     addPopover.classList.add('hidden');
     document.getElementById('create-html-modal').classList.remove('hidden');
   });
@@ -1107,6 +1143,7 @@ async function bootstrap() {
 
     const editGroupBtn = e.target.closest('[data-edit-group]');
     if (editGroupBtn) {
+      triggerHaptic('light');
       const targetGroup = editGroupBtn.dataset.editGroup;
       const next = await openInputModal({ title: 'Đổi tên nhóm', value: targetGroup, placeholder: 'Tên nhóm mới' });
       const clean = next?.trim();
@@ -1125,6 +1162,7 @@ async function bootstrap() {
 
     const delGroupBtn = e.target.closest('[data-del-group]');
     if (delGroupBtn) {
+      triggerHaptic('medium');
       const targetGroup = delGroupBtn.dataset.delGroup;
       const ok = await openConfirmModal({ title: 'Xóa nhóm', message: `Xóa nhóm "${targetGroup}"? Các sách sẽ giữ nguyên và chuyển về Chưa phân nhóm.` });
       if (!ok) return;
@@ -1142,6 +1180,7 @@ async function bootstrap() {
 
     const groupFilterBtn = e.target.closest('[data-group-filter]');
     if (groupFilterBtn) {
+      triggerHaptic('selection');
       const g = groupFilterBtn.dataset.groupFilter;
       if (!g) setSelectedGroup(null);
       else setSelectedGroup(selectedGroup?.toLowerCase() === g.toLowerCase() ? null : g);
@@ -1151,6 +1190,7 @@ async function bootstrap() {
 
     const groupBtn = e.target.closest('[data-select-group]');
     if (groupBtn) {
+      triggerHaptic('selection');
       const g = groupBtn.dataset.selectGroup;
       setSelectedGroup(selectedGroup?.toLowerCase() === g.toLowerCase() ? null : g);
       renderGroupsTab();
@@ -1160,14 +1200,20 @@ async function bootstrap() {
     const heroCard = e.target.closest('[data-open-hero]');
     if (heroCard) {
       const b = books.find((x) => x.id === heroCard.dataset.openHero);
-      if (b) await openBook(b);
+      if (b) {
+        triggerHaptic('light');
+        await openBook(b);
+      }
       return;
     }
 
     const tile = e.target.closest('.book-tile');
     if (tile) {
       const b = books.find((x) => x.id === tile.dataset.bookId);
-      if (b) await openBook(b);
+      if (b) {
+        triggerHaptic('light');
+        await openBook(b);
+      }
     }
   });
 
@@ -1177,11 +1223,13 @@ async function bootstrap() {
     if (e.target === actionModal) actionModal.classList.add('hidden');
   });
   document.getElementById('book-act-cover').addEventListener('click', () => {
+    triggerHaptic('light');
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (b) openCoverEditorModal(b);
   });
   document.getElementById('book-act-rename').addEventListener('click', async () => {
+    triggerHaptic('light');
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
@@ -1194,6 +1242,7 @@ async function bootstrap() {
     }
   });
   document.getElementById('book-act-group').addEventListener('click', () => {
+    triggerHaptic('light');
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (b) openGroupPickerModal(b);
@@ -1202,12 +1251,14 @@ async function bootstrap() {
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
+    triggerHaptic(b.isFavorite ? 'light' : 'medium');
     await updateBookMeta(b.id, { isFavorite: !b.isFavorite });
     books = await loadAllBooks();
     renderAllTabs();
     showToast(b.isFavorite ? 'Đã bỏ yêu thích' : 'Đã thêm vào yêu thích');
   });
   document.getElementById('book-act-share').addEventListener('click', async () => {
+    triggerHaptic('light');
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
@@ -1223,6 +1274,7 @@ async function bootstrap() {
     showToast('Đã tải tệp về thiết bị');
   });
   document.getElementById('book-act-delete').addEventListener('click', async () => {
+    triggerHaptic('medium');
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
@@ -1236,6 +1288,7 @@ async function bootstrap() {
 
   // Groups header buttons
   document.getElementById('groups-btn-new').addEventListener('click', async () => {
+    triggerHaptic('light');
     const name = await openInputModal({ title: 'Tạo nhóm mới', placeholder: 'Ví dụ: Nội khoa, Giải phẫu...' });
     const clean = name?.trim();
     if (clean) {
@@ -1249,6 +1302,7 @@ async function bootstrap() {
     }
   });
   document.getElementById('groups-btn-edit').addEventListener('click', async () => {
+    triggerHaptic('light');
     const target = selectedGroup && selectedGroup !== '__UNGROUPED__' ? selectedGroup : null;
     if (!target) {
       showToast('Chạm vào một thẻ nhóm bên dưới để sửa hoặc xóa');
@@ -1270,56 +1324,88 @@ async function bootstrap() {
 
   // Settings handlers
   document.getElementById('set-row-app-theme').addEventListener('click', () => {
+    triggerHaptic('selection');
     const idx = (APP_THEMES.indexOf(settings.appThemeMode) + 1) % APP_THEMES.length;
     updateSettings({ ...settings, appThemeMode: APP_THEMES[idx] });
   });
   document.getElementById('set-row-font').addEventListener('click', () => {
+    triggerHaptic('selection');
     const curIdx = FONT_FAMILIES.findIndex((f) => f.key === settings.fontFamily);
     const next = FONT_FAMILIES[(curIdx + 1) % FONT_FAMILIES.length];
     updateSettings({ ...settings, fontFamily: next.key });
   });
   document.getElementById('set-toggle-tts').addEventListener('change', (e) => {
+    triggerHaptic('selection');
     updateSettings({ ...settings, readAloudEnabled: e.target.checked });
   });
   document.getElementById('set-toggle-keep-on').addEventListener('change', (e) => {
+    triggerHaptic('selection');
     updateSettings({ ...settings, keepScreenOn: e.target.checked });
   });
   document.getElementById('set-toggle-tap-edge').addEventListener('change', (e) => {
+    triggerHaptic('selection');
     updateSettings({ ...settings, tapEdgeToTurnPage: e.target.checked });
   });
+  document.getElementById('set-toggle-haptic')?.addEventListener('change', (e) => {
+    setHapticEnabled(e.target.checked);
+    if (e.target.checked) triggerHaptic('selection');
+    updateSettings({ ...settings, hapticEnabled: e.target.checked });
+  });
   document.getElementById('set-glass-opacity-slider').addEventListener('input', (e) => {
-    const op = Math.max(25, Math.min(100, Number(e.target.value))) / 100;
-    updateSettings({ ...settings, glassOpacity: op });
+    const pct = Math.max(25, Math.min(100, Number(e.target.value)));
+    const prevPct = Math.round((settings.glassOpacity ?? 0.78) * 100);
+    if (Math.round(pct / 5) !== Math.round(prevPct / 5)) triggerHaptic('selection');
+    updateSettings({ ...settings, glassOpacity: pct / 100 });
   });
   document.getElementById('set-theme-swatches').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-set-theme]');
-    if (btn) updateSettings({ ...settings, themeMode: btn.dataset.setTheme });
+    if (btn) {
+      triggerHaptic('selection');
+      updateSettings({ ...settings, themeMode: btn.dataset.setTheme });
+    }
   });
   document.getElementById('set-font-slider')?.addEventListener('input', (e) => {
     const sz = Math.max(12, Math.min(28, Number(e.target.value)));
+    if (sz !== settings.fontSizePt) triggerHaptic('selection');
     updateSettings({ ...settings, fontSizePt: sz });
   });
   document.getElementById('set-font-minus').addEventListener('click', () => {
+    triggerHaptic('selection');
     updateSettings({ ...settings, fontSizePt: Math.max(12, settings.fontSizePt - 1) });
   });
   document.getElementById('set-font-plus').addEventListener('click', () => {
+    triggerHaptic('selection');
     updateSettings({ ...settings, fontSizePt: Math.min(28, settings.fontSizePt + 1) });
   });
-  document.getElementById('set-btn-backup').addEventListener('click', exportLibraryBackupZip);
+  document.getElementById('set-btn-backup').addEventListener('click', () => {
+    triggerHaptic('light');
+    exportLibraryBackupZip();
+  });
   document.getElementById('set-btn-restore').addEventListener('click', () => {
+    triggerHaptic('light');
     backupInput.value = '';
     backupInput.click();
   });
 
   // iPhone install guide triggers
   const iosModal = document.getElementById('ios-guide-modal');
-  document.getElementById('set-row-ios-install').addEventListener('click', () => iosModal.classList.remove('hidden'));
-  document.getElementById('ios-banner-open').addEventListener('click', () => iosModal.classList.remove('hidden'));
+  document.getElementById('set-row-ios-install').addEventListener('click', () => {
+    triggerHaptic('light');
+    iosModal.classList.remove('hidden');
+  });
+  document.getElementById('ios-banner-open').addEventListener('click', () => {
+    triggerHaptic('light');
+    iosModal.classList.remove('hidden');
+  });
   document.getElementById('ios-banner-dismiss').addEventListener('click', () => {
+    triggerHaptic('light');
     localStorage.setItem('yunzy_ios_guide_dismissed', '1');
     document.getElementById('ios-install-banner').classList.add('hidden');
   });
-  document.getElementById('ios-guide-close').addEventListener('click', () => iosModal.classList.add('hidden'));
+  document.getElementById('ios-guide-close').addEventListener('click', () => {
+    triggerHaptic('light');
+    iosModal.classList.add('hidden');
+  });
   iosModal.addEventListener('click', (e) => {
     if (e.target === iosModal) iosModal.classList.add('hidden');
   });
