@@ -88,7 +88,7 @@ export function formatBytesMb(bytes) {
 export function extractHtmlTitle(html, fallback) {
   const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
   if (m && m[1]) {
-    const clean = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const clean = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     if (clean) return clean;
   }
   return extractFirstHeading(html) || fallback;
@@ -97,7 +97,7 @@ export function extractHtmlTitle(html, fallback) {
 export function extractFirstHeading(html) {
   const m = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i.exec(html);
   if (m && m[1]) {
-    const clean = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const clean = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     if (clean) return clean.slice(0, 60);
   }
   return '';
@@ -130,4 +130,43 @@ export function downloadBlob(blobOrBytes, filename, mimeType) {
     a.remove();
     URL.revokeObjectURL(url);
   }, 1500);
+}
+
+function readFileAsDataUrlFallback(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error || new Error('Không đọc được ảnh bìa'));
+    fr.readAsDataURL(file);
+  });
+}
+
+export async function compressCoverImage(file, maxW = 360, maxH = 486, quality = 0.82) {
+  if (!file) throw new Error('Thiếu tệp ảnh');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Không giải mã được ảnh'));
+      el.src = url;
+    });
+    const srcW = Math.max(1, img.naturalWidth || img.width || maxW);
+    const srcH = Math.max(1, img.naturalHeight || img.height || maxH);
+    const scale = Math.min(1, maxW / srcW, maxH / srcH);
+    const outW = Math.max(1, Math.round(srcW * scale));
+    const outH = Math.max(1, Math.round(srcH * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return await readFileAsDataUrlFallback(file);
+    ctx.drawImage(img, 0, 0, outW, outH);
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch (_) {
+    return await readFileAsDataUrlFallback(file);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

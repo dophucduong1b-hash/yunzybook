@@ -1,19 +1,28 @@
 import { parseDocxBytes, renderDocxPagesToHtml, buildDocxBytesFromPages } from './docx.js';
-import { createReaderController } from './reader.js';
+import {
+  SESSION_STORAGE_KEY,
+  createReaderController,
+  syncSafeAreaMetrics
+} from './reader.js';
 import {
   DEFAULT_SETTINGS,
   computeStorageStats,
   deleteBook,
+  getBookContent,
   loadAllBooks,
   loadGroups,
   loadSettings,
+  saveBookContent,
   saveGroups,
   saveSettings,
+  updateBookMeta,
+  updateBookProgress,
   upsertBook
 } from './storage.js';
 import {
   COVER_PALETTES,
   GROUP_ACCENTS,
+  compressCoverImage,
   downloadBlob,
   escapeAttr,
   extractFirstHeading,
@@ -50,6 +59,14 @@ let selectedGroup = sessionStorage.getItem('yunzy_selected_group') || null;
 let toastTimer = null;
 let pendingCoverBookId = null;
 let lastLongPressAt = 0;
+let savedLibraryScrollY = 0;
+
+function applyBookMetaPatchToMemory(id, patch) {
+  const idx = books.findIndex((b) => b.id === id);
+  if (idx >= 0) {
+    books[idx] = { ...books[idx], ...patch, id };
+  }
+}
 
 function setSelectedGroup(val) {
   selectedGroup = val || null;
@@ -187,7 +204,7 @@ function openGroupPickerModal(book) {
     modal.removeEventListener('click', onBackdrop);
   };
   const applyGroup = async (groupName) => {
-    await upsertBook({ ...book, groupName });
+    await updateBookMeta(book.id, { groupName });
     books = await loadAllBooks();
     groups = await loadGroups();
     renderAllTabs();
@@ -268,8 +285,7 @@ function openCoverEditorModal(book) {
     coverInput.click();
   };
   const onSave = async () => {
-    await upsertBook({
-      ...book,
+    await updateBookMeta(book.id, {
       coverColorIndex: selectedIdx,
       customCoverDataUrl: useCustom ? book.customCoverDataUrl : null
     });
@@ -291,27 +307,40 @@ function openCoverEditorModal(book) {
 const reader = createReaderController({
   getSettings: () => settings,
   onUpdateSettings: updateSettings,
-  onUpdateBook: async (updated) => {
-    await upsertBook(updated);
-    const idx = books.findIndex((b) => b.id === updated.id);
-    if (idx >= 0) books[idx] = updated;
-    else books.unshift(updated);
+  getBookContent,
+  onUpdateBookProgress: async (id, patch) => {
+    const updated = await updateBookProgress(id, patch);
+    applyBookMetaPatchToMemory(id, updated || patch);
+  },
+  onUpdateBookMeta: async (id, patch) => {
+    const updated = await updateBookMeta(id, patch);
+    applyBookMetaPatchToMemory(id, updated || patch);
+  },
+  onSaveBookContent: async (id, contentPatch, metaPatch) => {
+    const updated = await saveBookContent(id, contentPatch, metaPatch);
+    if (updated) applyBookMetaPatchToMemory(id, updated);
+    else if (metaPatch) applyBookMetaPatchToMemory(id, metaPatch);
   },
   onCreateCopyBook: async (sourceBook, newTitle, pages, bodyHtml) => {
     const newId = crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
     const isDocx = sourceBook.kind === 'docx';
+    const srcContent = await getBookContent(sourceBook.id);
+    const baseHtml = srcContent?.htmlContent || '';
     const htmlContent = isDocx
       ? renderDocxPagesToHtml(newTitle, pages)
-      : sourceBook.htmlContent.replace(/(<body[^>]*>)[\s\S]*(<\/body>)/i, `$1\n${bodyHtml}\n$2`);
+      : /<body[^>]*>[\s\S]*<\/body>/i.test(baseHtml)
+      ? baseHtml.replace(/(<body[^>]*>)[\s\S]*(<\/body>)/i, (_, open, close) => `${open}\n${bodyHtml}\n${close}`)
+      : `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"/><title>${escapeAttr(newTitle)}</title></head><body>\n${bodyHtml}\n</body></html>`;
     const copyDoc = {
       ...sourceBook,
       id: newId,
       title: newTitle,
       subtitle: isDocx ? `DOCX · ${Math.max(1, pages.length)} trang` : sourceBook.subtitle,
-      docxPages: isDocx ? pages : sourceBook.docxPages,
+      docxPages: isDocx ? pages : (srcContent?.docxPages ?? null),
       htmlContent,
       progressPercent: 0,
       scrollRatio: 0,
+      scrollY: 0,
       addedAt: Date.now(),
       lastOpenedAt: Date.now(),
       fileSizeBytes: htmlContent.length
@@ -323,16 +352,22 @@ const reader = createReaderController({
   },
   onShowToast: showToast,
   onCloseReader: async () => {
+    applyGlobalVisualTheme();
     books = await loadAllBooks();
     renderAllTabs();
+    requestAnimationFrame(() => window.scrollTo(0, savedLibraryScrollY));
   }
 });
 
-async function openBook(book) {
-  const updated = { ...book, lastOpenedAt: Date.now() };
-  await upsertBook(updated);
-  books = await loadAllBooks();
-  await reader.open(updated);
+async function openBook(book, restoreHint = null) {
+  if (!document.body.classList.contains('reader-open')) {
+    savedLibraryScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  }
+  const now = Date.now();
+  const updated = (await updateBookMeta(book.id, { lastOpenedAt: now })) || { ...book, lastOpenedAt: now };
+  applyBookMetaPatchToMemory(book.id, updated);
+  books.sort((a, b) => (b.lastOpenedAt || b.addedAt || 0) - (a.lastOpenedAt || a.addedAt || 0));
+  await reader.open(updated, restoreHint);
 }
 
 function getFilteredBooks() {
@@ -719,11 +754,13 @@ async function exportLibraryBackupZip() {
   const entries = [];
   const metaList = [];
   for (const b of all) {
-    const { htmlContent, rawBlob, ...meta } = b;
+    const content = await getBookContent(b.id);
+    const meta = { ...b };
+    if (content?.docxPages) meta.docxPages = content.docxPages;
     metaList.push(meta);
-    if (htmlContent) entries.push([`books/${b.id}.html`, htmlContent]);
-    if (rawBlob) {
-      const bin = rawBlob instanceof Uint8Array ? rawBlob : new Uint8Array(rawBlob);
+    if (content?.htmlContent) entries.push([`books/${b.id}.html`, content.htmlContent]);
+    if (content?.rawBlob) {
+      const bin = content.rawBlob instanceof Uint8Array ? content.rawBlob : new Uint8Array(content.rawBlob);
       entries.push([`books/${b.id}.bin`, bin]);
     }
   }
@@ -897,15 +934,9 @@ function showIosInstallModalIfFirstVisit() {
 }
 
 async function bootstrap() {
+  syncSafeAreaMetrics();
+
   if ('serviceWorker' in navigator) {
-    const hadController = Boolean(navigator.serviceWorker.controller);
-    let swReloading = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (hadController && !swReloading) {
-        swReloading = true;
-        window.location.reload();
-      }
-    });
     navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch(() => {});
   }
 
@@ -914,6 +945,26 @@ async function bootstrap() {
   groups = await loadGroups();
 
   applyGlobalVisualTheme();
+
+  try {
+    const rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (rawSession) {
+      const savedSession = JSON.parse(rawSession);
+      const targetBook = savedSession?.bookId
+        ? books.find((b) => b.id === savedSession.bookId)
+        : null;
+      if (targetBook) {
+        await openBook(targetBook, savedSession);
+      } else {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+    }
+  } catch (_) {
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (__) {}
+  } finally {
+    document.documentElement.classList.remove('session-resuming');
+  }
+
   renderAllTabs();
   initCreateHtmlModal();
   initTouchAndLongPressGestures();
@@ -985,14 +1036,15 @@ async function bootstrap() {
     const target = books.find((b) => b.id === pendingCoverBookId);
     pendingCoverBookId = null;
     if (!target) return;
-    const readerFr = new FileReader();
-    readerFr.onload = async () => {
-      await upsertBook({ ...target, customCoverDataUrl: readerFr.result });
+    try {
+      const dataUrl = await compressCoverImage(f);
+      await updateBookMeta(target.id, { customCoverDataUrl: dataUrl });
       books = await loadAllBooks();
       renderAllTabs();
       showToast('Đã cập nhật ảnh bìa');
-    };
-    readerFr.readAsDataURL(f);
+    } catch (_) {
+      showToast('Không thể đọc ảnh bìa');
+    }
   });
 
   // Grid, hero & group card clicks (delegated)
@@ -1008,7 +1060,7 @@ async function bootstrap() {
         groups = groups.map((g) => (g === targetGroup ? clean : g));
         await saveGroups(groups);
         for (const b of books.filter((x) => x.groupName === targetGroup)) {
-          await upsertBook({ ...b, groupName: clean });
+          await updateBookMeta(b.id, { groupName: clean });
         }
         if (selectedGroup === targetGroup) setSelectedGroup(clean);
         books = await loadAllBooks();
@@ -1025,7 +1077,7 @@ async function bootstrap() {
       groups = groups.filter((g) => g !== targetGroup);
       await saveGroups(groups);
       for (const b of books.filter((x) => x.groupName === targetGroup)) {
-        await upsertBook({ ...b, groupName: '' });
+        await updateBookMeta(b.id, { groupName: '' });
       }
       if (selectedGroup === targetGroup) setSelectedGroup(null);
       books = await loadAllBooks();
@@ -1081,7 +1133,7 @@ async function bootstrap() {
     if (!b) return;
     const next = await openInputModal({ title: 'Đổi tên tài liệu', value: b.title, placeholder: 'Nhập tên mới' });
     if (next && next.trim()) {
-      await upsertBook({ ...b, title: next.trim() });
+      await updateBookMeta(b.id, { title: next.trim() });
       books = await loadAllBooks();
       renderAllTabs();
       showToast('Đã đổi tên tài liệu');
@@ -1096,7 +1148,7 @@ async function bootstrap() {
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
-    await upsertBook({ ...b, isFavorite: !b.isFavorite });
+    await updateBookMeta(b.id, { isFavorite: !b.isFavorite });
     books = await loadAllBooks();
     renderAllTabs();
     showToast(b.isFavorite ? 'Đã bỏ yêu thích' : 'Đã thêm vào yêu thích');
@@ -1105,13 +1157,14 @@ async function bootstrap() {
     const b = books.find((x) => x.id === actionModal.dataset.bookId);
     actionModal.classList.add('hidden');
     if (!b) return;
-    if (b.kind === 'docx' && b.docxPages) {
-      const bytes = await buildDocxBytesFromPages(b.docxPages);
+    const content = await getBookContent(b.id);
+    if (b.kind === 'docx' && content?.docxPages) {
+      const bytes = await buildDocxBytesFromPages(content.docxPages);
       downloadBlob(bytes, `${b.title}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    } else if (b.kind === 'pdf' && b.rawBlob) {
-      downloadBlob(b.rawBlob, `${b.title}.pdf`, 'application/pdf');
+    } else if (b.kind === 'pdf' && content?.rawBlob) {
+      downloadBlob(content.rawBlob, `${b.title}.pdf`, 'application/pdf');
     } else {
-      downloadBlob(b.htmlContent || '', `${b.title}.html`, 'text/html');
+      downloadBlob(content?.htmlContent || '', `${b.title}.html`, 'text/html');
     }
     showToast('Đã tải tệp về thiết bị');
   });
@@ -1153,7 +1206,7 @@ async function bootstrap() {
       groups = groups.map((g) => (g === target ? clean : g));
       await saveGroups(groups);
       for (const b of books.filter((x) => x.groupName === target)) {
-        await upsertBook({ ...b, groupName: clean });
+        await updateBookMeta(b.id, { groupName: clean });
       }
       setSelectedGroup(clean);
       books = await loadAllBooks();

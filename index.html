@@ -27,6 +27,11 @@
         return { promise, resolve, reject };
       };
     }
+    try {
+      if (localStorage.getItem('yunzy_reading_session')) {
+        document.documentElement.classList.add('session-resuming');
+      }
+    } catch (_) {}
   </script>
 </head>
 <body>
@@ -219,7 +224,7 @@
           </button>
           <div class="settings-row">
             <span class="row-label">Về YunzyBook</span>
-            <span class="row-val">v1.3 · hoạt động ngoại tuyến</span>
+            <span class="row-val">v1.6 · hoạt động ngoại tuyến</span>
           </div>
         </div>
       </section>
@@ -405,6 +410,7 @@
   <!-- READER OVERLAY -->
   <div id="reader-overlay" class="reader-overlay hidden">
     <div id="reader-stage" class="reader-stage"></div>
+    <div id="reader-top-scrim" class="reader-top-scrim" aria-hidden="true"></div>
 
     <!-- Read Mode Top Bar -->
     <header id="reader-topbar-read" class="reader-topbar glass-surface">

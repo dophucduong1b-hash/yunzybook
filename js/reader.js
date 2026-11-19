@@ -1,6 +1,8 @@
 import { buildDocxBytesFromPages, renderDocxPagesToHtml } from './docx.js';
 import { downloadBlob, escapeAttr, normalizeAppTheme } from './ui-helpers.js';
 
+export const SESSION_STORAGE_KEY = 'yunzy_reading_session';
+
 let pdfjsPromise = null;
 async function loadPdfJs() {
   if (!pdfjsPromise) {
@@ -25,10 +27,35 @@ const LINE_SPACING_MAP = {
   RELAXED: 1.98
 };
 
+let safeProbeEl = null;
+
+export function syncSafeAreaMetrics() {
+  if (typeof document === 'undefined') return 8;
+  if (!safeProbeEl) {
+    safeProbeEl = document.createElement('div');
+    safeProbeEl.id = '__yunzy_safe_probe';
+    safeProbeEl.style.cssText =
+      'position:fixed;top:0;left:0;width:0;height:0;padding-top:var(--safe-top, env(safe-area-inset-top, 0px));visibility:hidden;pointer-events:none;z-index:-1;';
+    (document.body || document.documentElement).appendChild(safeProbeEl);
+  }
+  const safeTop = parseFloat(getComputedStyle(safeProbeEl).paddingTop) || 0;
+  let dockTop = 8;
+  if (safeTop >= 40) {
+    dockTop = Math.max(8, Math.round(safeTop - 7));
+  } else if (safeTop > 0) {
+    dockTop = Math.round(safeTop + 4);
+  }
+  document.documentElement.style.setProperty('--reader-dock-top', `${dockTop}px`);
+  return dockTop;
+}
+
 export function createReaderController({
   getSettings,
   onUpdateSettings,
-  onUpdateBook,
+  getBookContent,
+  onUpdateBookProgress,
+  onUpdateBookMeta,
+  onSaveBookContent,
   onCreateCopyBook,
   onShowToast,
   onCloseReader
@@ -73,8 +100,11 @@ export function createReaderController({
 
   let currentBook = null;
   let activeIframe = null;
+  let activeBlobUrl = null;
+  let dockHidden = false;
   let pdfDoc = null;
   let pdfObserver = null;
+  let pdfSlots = [];
   let pdfZoomScale = 1.0;
   let currentPage = 1;
   let totalPages = 0;
@@ -85,13 +115,89 @@ export function createReaderController({
   let activeMatchIdx = 0;
   let isSpeaking = false;
   let wakeLock = null;
+  let scrollProgressTimer = null;
+  let pdfProgressTimer = null;
+  let iframeLoadFallbackTimer = null;
+  let openSequence = 0;
+  let lastResizeAt = 0;
+
+  function writeSessionSnapshot(bookId, scrollY, scrollRatio, page) {
+    if (!bookId) return;
+    try {
+      localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          bookId,
+          scrollY: Math.max(0, Math.round(scrollY || 0)),
+          scrollRatio: Math.max(0, Math.min(1, Number(scrollRatio || 0))),
+          page: Math.max(1, Math.round(page || 1)),
+          ts: Date.now()
+        })
+      );
+    } catch (_) {}
+  }
+
+  function clearSessionSnapshot() {
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (_) {}
+  }
+
+  function setDockHidden(hidden) {
+    const canHide =
+      !isEditing &&
+      aaBackdrop.classList.contains('hidden') &&
+      searchOverlay.classList.contains('hidden') &&
+      moreDropdown.classList.contains('hidden');
+    dockHidden = canHide ? Boolean(hidden) : false;
+    topBarRead?.classList.toggle('dock-hidden', dockHidden);
+    overlay?.classList.toggle('reader-immersive', dockHidden);
+  }
+
+  function trimPdfCanvases(centerPage, keepRadius = 3) {
+    for (const slot of pdfSlots) {
+      if (slot.rendered && Math.abs(slot.pageNum - centerPage) > keepRadius) {
+        const h = slot.card.offsetHeight;
+        if (h > 0) slot.card.style.minHeight = `${h}px`;
+        slot.canvas.width = 1;
+        slot.canvas.height = 1;
+        slot.canvas.style.width = '';
+        slot.canvas.style.height = '';
+        slot.rendered = false;
+      }
+    }
+  }
+
+  function cleanupStage() {
+    clearTimeout(scrollProgressTimer);
+    scrollProgressTimer = null;
+    clearTimeout(pdfProgressTimer);
+    pdfProgressTimer = null;
+    clearTimeout(iframeLoadFallbackTimer);
+    iframeLoadFallbackTimer = null;
+
+    if (pdfObserver) {
+      pdfObserver.disconnect();
+      pdfObserver = null;
+    }
+    pdfSlots = [];
+    if (pdfDoc) {
+      pdfDoc.destroy().catch(() => {});
+      pdfDoc = null;
+    }
+    if (activeBlobUrl) {
+      URL.revokeObjectURL(activeBlobUrl);
+      activeBlobUrl = null;
+    }
+    stageEl.innerHTML = '';
+    activeIframe = null;
+  }
 
   async function requestWakeLock() {
     if (!getSettings().keepScreenOn || !navigator.wakeLock) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   function releaseWakeLock() {
@@ -123,7 +229,7 @@ export function createReaderController({
     const prefix = (g && g.toLowerCase() !== titleTrim)
       ? g
       : (s && s.toLowerCase() !== titleTrim ? s : '');
-    subEl.textContent = prefix ? `${prefix} · ${pct}% đã đọc` : `${pct}% đã đọc`;
+    subEl.textContent = prefix ? `${pct}% · ${prefix}` : `${pct}% đã đọc`;
   }
 
   function updateBookmarkUi() {
@@ -196,7 +302,14 @@ export function createReaderController({
       SEPIA: '#F4ECD8',
       DARK: '#121622'
     };
-    overlay.style.background = bgMap[effTheme] || '#F7F8FC';
+    const readerBg = bgMap[effTheme] || '#F7F8FC';
+    overlay.style.background = readerBg;
+    overlay.dataset.readerTheme = effTheme;
+
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', readerBg);
+    }
 
     updateTtsButton();
     updatePageNavUi();
@@ -216,7 +329,7 @@ export function createReaderController({
     const doc = activeIframe?.contentDocument;
     if (!doc || !doc.head || !doc.body) return;
 
-    // 1. Safe padding + responsive text size
+    // 1. Safe padding (stable whether dock is visible or auto-hidden) + responsive text size
     let padStyle = doc.getElementById('__yunzy_pad_style');
     if (!padStyle) {
       padStyle = doc.createElement('style');
@@ -224,9 +337,9 @@ export function createReaderController({
       doc.head.appendChild(padStyle);
     }
     const zoomScale = (s.fontSizePt / 17).toFixed(3);
-    const activeTopBar = isEditing ? topBarEdit : topBarRead;
-    const barBottom = activeTopBar?.getBoundingClientRect().bottom || 0;
-    const topPad = Math.max(84, Math.ceil(barBottom + 14));
+    const dockTopPx =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--reader-dock-top')) || 8;
+    const topPad = Math.ceil(dockTopPx + 44 + 8);
     const botPad = isEditing ? 108 : 88;
     padStyle.textContent = `
       html, body { height: auto !important; min-height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important; -webkit-overflow-scrolling: touch !important; }
@@ -296,6 +409,7 @@ export function createReaderController({
     const clamped = Math.max(1, Math.min(target, totalPages));
     currentPage = clamped;
 
+    let scrollY = 0;
     if (currentBook.kind === 'pdf') {
       await renderPdfPaginatedPage(clamped);
     } else if (activeIframe?.contentDocument) {
@@ -304,41 +418,80 @@ export function createReaderController({
         applyAppearance();
       } else {
         const winH = Math.max(activeIframe.clientHeight - 110, 260);
-        activeIframe.contentWindow?.scrollTo({ top: Math.max(0, (clamped - 1) * winH), behavior: 'smooth' });
+        scrollY = Math.max(0, (clamped - 1) * winH);
+        activeIframe.contentWindow?.scrollTo({ top: scrollY, behavior: 'smooth' });
       }
     }
 
     const ratio = totalPages <= 1 ? 1 : (clamped - 1) / (totalPages - 1);
     const pct = Math.max(0, Math.min(100, Math.round((clamped / totalPages) * 100)));
-    await persistProgress(pct, ratio, `Trang ${clamped} / ${totalPages}`);
+    writeSessionSnapshot(currentBook.id, scrollY, ratio, clamped);
+    await persistProgress(pct, ratio, `Trang ${clamped} / ${totalPages}`, scrollY);
     updatePageNavUi();
   }
 
-  async function persistProgress(pct, ratio, chapter) {
+  async function persistProgress(pct, ratio, chapter, scrollY = null) {
     if (!currentBook) return;
-    currentBook = {
-      ...currentBook,
+    const bookId = currentBook.id;
+    const nextScrollY = scrollY !== null ? Math.max(0, Math.round(scrollY)) : (currentBook.scrollY || 0);
+    const patch = {
       progressPercent: pct,
       scrollRatio: ratio,
+      scrollY: nextScrollY,
       currentChapterTitle: chapter || currentBook.currentChapterTitle,
       lastOpenedAt: Date.now()
     };
+    currentBook = { ...currentBook, ...patch };
     updateReaderSubtitle();
-    await onUpdateBook(currentBook);
+    await onUpdateBookProgress(bookId, patch);
   }
 
-  async function renderPdfBook(book) {
-    stageEl.innerHTML = '';
+  function flushCurrentProgressSync() {
+    if (!currentBook) return;
+    if (currentBook.kind === 'pdf') {
+      const ratio = totalPages <= 1 ? 1 : (currentPage - 1) / (totalPages - 1);
+      const pct = totalPages > 0
+        ? Math.max(0, Math.min(100, Math.round((currentPage / totalPages) * 100)))
+        : (currentBook.progressPercent || 0);
+      const chap = totalPages > 0 ? `Trang ${currentPage} / ${totalPages}` : currentBook.currentChapterTitle;
+      writeSessionSnapshot(currentBook.id, 0, ratio, currentPage);
+      persistProgress(pct, ratio, chap, 0).catch(() => {});
+      return;
+    }
+
+    const doc = activeIframe?.contentDocument;
+    const win = activeIframe?.contentWindow;
+    if (!doc || !win) return;
+    const y = Math.max(0, win.scrollY || 0);
+    const docH = Math.max(doc.body?.scrollHeight || 0, doc.documentElement?.scrollHeight || 0, 1);
+    const maxScroll = Math.max(1, docH - activeIframe.clientHeight);
+    const ratio = Math.max(0, Math.min(1, y / maxScroll));
+    const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    const approxPage = totalPages > 0
+      ? Math.max(1, Math.min(totalPages, Math.round(ratio * Math.max(0, totalPages - 1)) + 1))
+      : currentPage;
+    writeSessionSnapshot(currentBook.id, y, ratio, approxPage);
+    persistProgress(pct, ratio, currentBook.currentChapterTitle, y).catch(() => {});
+  }
+
+  async function renderPdfBook(book, rawBlob, restoreHint = null) {
+    cleanupStage();
+    if (!rawBlob) {
+      throw new Error('Không tìm thấy dữ liệu PDF.');
+    }
     const pdfjs = await loadPdfJs();
-    const dataCopy = book.rawBlob instanceof ArrayBuffer
-      ? book.rawBlob.slice(0)
-      : book.rawBlob instanceof Uint8Array
-      ? book.rawBlob.slice().buffer
-      : await book.rawBlob.arrayBuffer();
+    const dataCopy = rawBlob instanceof ArrayBuffer
+      ? rawBlob.slice(0)
+      : rawBlob instanceof Uint8Array
+      ? rawBlob.slice().buffer
+      : await rawBlob.arrayBuffer();
 
     pdfDoc = await pdfjs.getDocument({ data: new Uint8Array(dataCopy) }).promise;
     totalPages = pdfDoc.numPages || 1;
-    const restored = Math.round((book.scrollRatio || 0) * Math.max(0, totalPages - 1)) + 1;
+    const hintRatio = restoreHint?.scrollRatio ?? book.scrollRatio ?? 0;
+    const restored = restoreHint?.page
+      ? Number(restoreHint.page)
+      : Math.round(hintRatio * Math.max(0, totalPages - 1)) + 1;
     currentPage = Math.max(1, Math.min(restored, totalPages));
     pdfZoomScale = 1.0;
 
@@ -353,7 +506,7 @@ export function createReaderController({
   async function renderPdfPageCanvas(pageNum, canvas, maxCssWidth) {
     if (!pdfDoc || !canvas) return;
     const page = await pdfDoc.getPage(pageNum);
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const baseVp = page.getViewport({ scale: 1 });
     const cssScale = (maxCssWidth / baseVp.width) * pdfZoomScale;
     const vp = page.getViewport({ scale: cssScale * dpr });
@@ -365,10 +518,16 @@ export function createReaderController({
 
     const ctx = canvas.getContext('2d');
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    try { page.cleanup(); } catch (_) {}
   }
 
   async function renderPdfPaginatedPage(pageNum) {
     if (!pdfDoc) return;
+    if (pdfObserver) {
+      pdfObserver.disconnect();
+      pdfObserver = null;
+    }
+    pdfSlots = [];
     stageEl.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = 'pdf-paginated-wrap';
@@ -383,8 +542,11 @@ export function createReaderController({
 
   async function renderPdfScrollMode() {
     if (!pdfDoc) return;
+    if (pdfObserver) {
+      pdfObserver.disconnect();
+      pdfObserver = null;
+    }
     stageEl.innerHTML = '';
-    if (pdfObserver) pdfObserver.disconnect();
 
     const wrap = document.createElement('div');
     wrap.className = 'pdf-scroll-wrap';
@@ -405,7 +567,38 @@ export function createReaderController({
       wrap.appendChild(card);
       placeholders.push({ pageNum: i, card, canvas, rendered: false });
     }
+    pdfSlots = placeholders;
     stageEl.appendChild(wrap);
+
+    const mountedAt = Date.now();
+    let lastWrapY = 0;
+    let tapStartX = 0;
+    let tapStartY = 0;
+    let tapStartTime = 0;
+
+    wrap.addEventListener('pointerdown', (e) => {
+      closeMoreMenu();
+      tapStartX = e.clientX;
+      tapStartY = e.clientY;
+      tapStartTime = Date.now();
+    }, { passive: true });
+
+    wrap.addEventListener('click', (e) => {
+      if (Date.now() - tapStartTime > 320) return;
+      if (Math.hypot(e.clientX - tapStartX, e.clientY - tapStartY) >= 10) return;
+      const target = e.target?.nodeType === 1 ? e.target : e.target?.parentElement;
+      if (target?.closest('a, button, input, select, textarea, [role="button"]')) return;
+      setDockHidden(!dockHidden);
+    });
+
+    wrap.addEventListener('scroll', () => {
+      const y = Math.max(0, wrap.scrollTop || 0);
+      if (Date.now() - mountedAt > 250 && Date.now() - lastResizeAt > 350) {
+        if (y > 56 && y - lastWrapY > 18) setDockHidden(true);
+        else if (lastWrapY - y > 14 || y <= 32) setDockHidden(false);
+      }
+      lastWrapY = y;
+    }, { passive: true });
 
     pdfObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
@@ -414,12 +607,23 @@ export function createReaderController({
         const slot = placeholders[pNum - 1];
         if (slot && !slot.rendered) {
           slot.rendered = true;
-          renderPdfPageCanvas(pNum, slot.canvas, maxW).catch(() => {});
+          renderPdfPageCanvas(pNum, slot.canvas, maxW)
+            .then(() => {
+              slot.card.style.minHeight = '';
+            })
+            .catch(() => {});
         }
         currentPage = pNum;
+        trimPdfCanvases(pNum, 3);
         const ratio = totalPages <= 1 ? 1 : (pNum - 1) / (totalPages - 1);
         const pct = Math.round((pNum / totalPages) * 100);
-        persistProgress(pct, ratio, `Trang ${pNum} / ${totalPages}`).catch(() => {});
+        if (currentBook) {
+          writeSessionSnapshot(currentBook.id, 0, ratio, pNum);
+          clearTimeout(pdfProgressTimer);
+          pdfProgressTimer = setTimeout(() => {
+            persistProgress(pct, ratio, `Trang ${pNum} / ${totalPages}`, 0).catch(() => {});
+          }, 240);
+        }
       }
     }, { root: wrap, threshold: 0.25 });
 
@@ -427,55 +631,127 @@ export function createReaderController({
 
     if (currentPage > 1 && placeholders[currentPage - 1]) {
       setTimeout(() => {
-        placeholders[currentPage - 1].card.scrollIntoView({ behavior: 'instant', block: 'start' });
+        placeholders[currentPage - 1]?.card.scrollIntoView({ behavior: 'instant', block: 'start' });
+        lastWrapY = wrap.scrollTop || 0;
       }, 60);
     }
   }
 
-  function renderHtmlOrDocxBook(book) {
-    stageEl.innerHTML = '';
+  function renderHtmlOrDocxBook(book, htmlContent, restoreHint = null) {
+    cleanupStage();
+    const blob = new Blob(
+      [htmlContent || '<!DOCTYPE html><html><body><p></p></body></html>'],
+      { type: 'text/html;charset=utf-8' }
+    );
+    activeBlobUrl = URL.createObjectURL(blob);
+
     const iframe = document.createElement('iframe');
-    iframe.className = 'reader-iframe';
+    iframe.className = 'reader-iframe is-restoring';
     iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts');
     iframe.setAttribute('title', book.title);
-    iframe.srcdoc = book.htmlContent || '<html><body><p></p></body></html>';
+    iframe.src = activeBlobUrl;
     stageEl.appendChild(iframe);
     activeIframe = iframe;
 
+    iframeLoadFallbackTimer = setTimeout(() => {
+      iframe.classList.remove('is-restoring');
+    }, 400);
+
     iframe.addEventListener('load', () => {
+      if (iframe !== activeIframe) return;
       const doc = iframe.contentDocument;
       const win = iframe.contentWindow;
       if (!doc || !win) return;
 
-      doc.addEventListener('pointerdown', closeMoreMenu);
+      const loadedAt = Date.now();
+      let lastScrollY = 0;
+      let restoreComplete = false;
+      let tapStartX = 0;
+      let tapStartY = 0;
+      let tapStartTime = 0;
+
+      doc.addEventListener('pointerdown', (e) => {
+        closeMoreMenu();
+        tapStartX = e.clientX;
+        tapStartY = e.clientY;
+        tapStartTime = Date.now();
+      }, { passive: true });
+
+      doc.addEventListener('click', (e) => {
+        if (isEditing) return;
+        if (!aaBackdrop.classList.contains('hidden') || !searchOverlay.classList.contains('hidden')) return;
+        const selText = win.getSelection()?.toString().trim() || '';
+        if (selText.length > 0) return;
+        if (Date.now() - tapStartTime > 320) return;
+        if (Math.hypot(e.clientX - tapStartX, e.clientY - tapStartY) >= 10) return;
+        const target = e.target?.nodeType === 1 ? e.target : e.target?.parentElement;
+        if (!target) return;
+        if (target.closest('a, button, input, select, textarea, label, summary, details, [role="button"], [onclick], [contenteditable="true"]')) {
+          return;
+        }
+        if (win.getComputedStyle(target).cursor === 'pointer') {
+          return;
+        }
+        setDockHidden(!dockHidden);
+      });
 
       const docxCount = doc.querySelectorAll('.docx-page').length;
+      const hintRatio = Number(restoreHint?.scrollRatio ?? book.scrollRatio ?? 0);
       if (docxCount > 0) {
         totalPages = docxCount;
-        currentPage = Math.max(1, Math.min(Math.round((book.scrollRatio || 0) * Math.max(0, docxCount - 1)) + 1, docxCount));
+        const targetPage = restoreHint?.page
+          ? Number(restoreHint.page)
+          : Math.round(hintRatio * Math.max(0, docxCount - 1)) + 1;
+        currentPage = Math.max(1, Math.min(targetPage, docxCount));
       }
 
       applyAppearance();
 
-      if (book.scrollRatio > 0.04 && getSettings().pageMode === 'SCROLL') {
-        const maxScroll = Math.max(0, Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight) - iframe.clientHeight);
-        if (maxScroll > 0) win.scrollTo(0, maxScroll * book.scrollRatio);
-      }
+      const targetY = Number(restoreHint?.scrollY ?? book.scrollY ?? 0);
+      const targetRatio = hintRatio;
 
-      let scrollTimer = null;
+      win.requestAnimationFrame(() => {
+        win.requestAnimationFrame(() => {
+          if (iframe !== activeIframe) return;
+          if (getSettings().pageMode === 'SCROLL') {
+            const maxScroll = Math.max(0, Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight) - iframe.clientHeight);
+            if (targetY > 0 && maxScroll > 0) {
+              win.scrollTo(0, Math.min(targetY, maxScroll));
+            } else if (targetRatio > 0 && maxScroll > 0) {
+              win.scrollTo(0, maxScroll * targetRatio);
+            }
+          }
+          clearTimeout(iframeLoadFallbackTimer);
+          iframeLoadFallbackTimer = null;
+          iframe.classList.remove('is-restoring');
+          lastScrollY = Math.max(0, win.scrollY || 0);
+          restoreComplete = true;
+        });
+      });
+
       win.addEventListener('scroll', () => {
+        if (!restoreComplete) return;
         if (getSettings().pageMode === 'PAGINATED' && doc.querySelectorAll('.docx-page').length > 0) return;
-        clearTimeout(scrollTimer);
-        scrollTimer = setTimeout(() => {
+        const y = Math.max(0, win.scrollY || 0);
+        if (Date.now() - loadedAt > 250 && Date.now() - lastResizeAt > 350 && !isEditing) {
+          if (y > 56 && y - lastScrollY > 18) setDockHidden(true);
+          else if (lastScrollY - y > 14 || y <= 32) setDockHidden(false);
+        }
+        lastScrollY = y;
+
+        clearTimeout(scrollProgressTimer);
+        scrollProgressTimer = setTimeout(() => {
+          if (!currentBook || iframe !== activeIframe) return;
           const docH = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 1);
           const maxScroll = Math.max(1, docH - iframe.clientHeight);
-          const ratio = Math.max(0, Math.min(1, win.scrollY / maxScroll));
+          const ratio = Math.max(0, Math.min(1, y / maxScroll));
           const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
           const approxPage = totalPages > 0 ? Math.max(1, Math.min(totalPages, Math.round(ratio * Math.max(0, totalPages - 1)) + 1)) : 1;
           currentPage = approxPage;
-          const chap = doc.querySelectorAll('.docx-page').length > 0 ? `Trang ${approxPage} / ${totalPages}` : currentBook?.currentChapterTitle;
-          persistProgress(pct, ratio, chap);
-        }, 220);
+          const chap = doc.querySelectorAll('.docx-page').length > 0 ? `Trang ${approxPage} / ${totalPages}` : currentBook.currentChapterTitle;
+          writeSessionSnapshot(currentBook.id, y, ratio, approxPage);
+          persistProgress(pct, ratio, chap, y);
+        }, 240);
       }, { passive: true });
     });
   }
@@ -734,25 +1010,24 @@ export function createReaderController({
   async function saveDirect() {
     if (!currentBook || !activeIframe?.contentDocument) return;
     const { pages, bodyHtml } = extractEditedDocxPages();
-    let updatedHtml = currentBook.htmlContent || '';
     if (currentBook.kind === 'docx') {
-      updatedHtml = renderDocxPagesToHtml(currentBook.title, pages);
-      currentBook = {
-        ...currentBook,
-        htmlContent: updatedHtml,
-        docxPages: pages,
+      const updatedHtml = renderDocxPagesToHtml(currentBook.title, pages);
+      const metaPatch = {
         subtitle: `DOCX · ${Math.max(1, pages.length)} trang`,
         fileSizeBytes: updatedHtml.length
       };
+      await onSaveBookContent(currentBook.id, { htmlContent: updatedHtml, docxPages: pages }, metaPatch);
+      currentBook = { ...currentBook, ...metaPatch };
     } else {
-      updatedHtml = updatedHtml.replace(/(<body[^>]*>)[\s\S]*(<\/body>)/i, `$1\n${bodyHtml}\n$2`);
-      currentBook = {
-        ...currentBook,
-        htmlContent: updatedHtml,
-        fileSizeBytes: updatedHtml.length
-      };
+      const content = await getBookContent(currentBook.id);
+      const baseHtml = content?.htmlContent || '';
+      const updatedHtml = /<body[^>]*>[\s\S]*<\/body>/i.test(baseHtml)
+        ? baseHtml.replace(/(<body[^>]*>)[\s\S]*(<\/body>)/i, (_, open, close) => `${open}\n${bodyHtml}\n${close}`)
+        : `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"/><title>${escapeAttr(currentBook.title)}</title></head><body>\n${bodyHtml}\n</body></html>`;
+      const metaPatch = { fileSizeBytes: updatedHtml.length };
+      await onSaveBookContent(currentBook.id, { htmlContent: updatedHtml }, metaPatch);
+      currentBook = { ...currentBook, ...metaPatch };
     }
-    await onUpdateBook(currentBook);
     isDirty = false;
     updateEditStatus();
     onShowToast('Đã lưu thay đổi trực tiếp');
@@ -784,6 +1059,7 @@ export function createReaderController({
   function enterEditMode() {
     if (!currentBook || currentBook.kind === 'pdf') return;
     isEditing = true;
+    setDockHidden(false);
     topBarRead.classList.add('hidden');
     topBarEdit.classList.remove('hidden');
     editorRibbon.classList.remove('hidden');
@@ -798,10 +1074,10 @@ export function createReaderController({
     }
     isEditing = false;
     topBarEdit.classList.add('hidden');
-    editorRibbon.classList.remove('hidden');
     editorRibbon.classList.add('hidden');
     topBarRead.classList.remove('hidden');
     editMenuEl.classList.add('hidden');
+    setDockHidden(false);
     wireIframeEditing(false);
     applyAppearance();
   }
@@ -877,6 +1153,38 @@ export function createReaderController({
     if (sizeVal) sizeVal.textContent = `${s.fontSizePt}pt`;
   }
 
+  // Lifecycle listeners for iOS PWA suspend / resume & Safe Area updates
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      if (currentBook) {
+        flushCurrentProgressSync();
+        if (currentBook.kind === 'pdf') {
+          trimPdfCanvases(currentPage, 1);
+        }
+      }
+    } else if (document.visibilityState === 'visible' && currentBook) {
+      requestWakeLock();
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    if (currentBook) flushCurrentProgressSync();
+  });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted && currentBook) requestWakeLock();
+  });
+  window.addEventListener('resize', () => {
+    lastResizeAt = Date.now();
+    syncSafeAreaMetrics();
+    if (currentBook) applyAppearance();
+  });
+  window.addEventListener('orientationchange', () => {
+    lastResizeAt = Date.now();
+    setTimeout(() => {
+      syncSafeAreaMetrics();
+      if (currentBook) applyAppearance();
+    }, 120);
+  });
+
   // Event bindings
   btnBack.addEventListener('click', close);
   btnMore?.addEventListener('click', (e) => {
@@ -884,9 +1192,11 @@ export function createReaderController({
     const willOpen = moreDropdown.classList.contains('hidden');
     if (willOpen) {
       aaBackdrop.classList.add('hidden');
+      btnAa.classList.remove('active');
       searchOverlay.classList.add('hidden');
       moreDropdown.classList.remove('hidden');
       btnMore.classList.add('active');
+      setDockHidden(false);
     } else {
       closeMoreMenu();
     }
@@ -911,6 +1221,7 @@ export function createReaderController({
     syncAaSheetControls();
     aaBackdrop.classList.toggle('hidden');
     btnAa.classList.toggle('active', !aaBackdrop.classList.contains('hidden'));
+    setDockHidden(false);
     updatePageNavUi();
   });
   aaBackdrop.addEventListener('click', (e) => {
@@ -925,6 +1236,7 @@ export function createReaderController({
     aaBackdrop.classList.add('hidden');
     btnAa.classList.remove('active');
     searchOverlay.classList.toggle('hidden');
+    setDockHidden(false);
     if (!searchOverlay.classList.contains('hidden')) {
       runSearch(searchInput.value);
       setTimeout(() => searchInput.focus(), 50);
@@ -939,10 +1251,11 @@ export function createReaderController({
 
   btnBookmark.addEventListener('click', async () => {
     if (!currentBook) return;
-    currentBook = { ...currentBook, isFavorite: !currentBook.isFavorite };
+    const nextFav = !currentBook.isFavorite;
+    currentBook = { ...currentBook, isFavorite: nextFav };
     updateBookmarkUi();
     closeMoreMenu();
-    await onUpdateBook(currentBook);
+    await onUpdateBookMeta(currentBook.id, { isFavorite: nextFav });
   });
 
   pageNavPrev.addEventListener('click', () => goToPage(currentPage - 1));
@@ -1034,15 +1347,17 @@ export function createReaderController({
     }
   });
 
-  async function open(book) {
-    currentBook = book;
+  async function open(book, restoreHint = null) {
+    const seq = ++openSequence;
+    cleanupStage();
+
+    currentBook = { ...book };
     isEditing = false;
     isDirty = false;
-    currentPage = 1;
+    currentPage = Math.max(1, Math.round(restoreHint?.page || 1));
     totalPages = 0;
-    pdfDoc = null;
-    activeIframe = null;
 
+    syncSafeAreaMetrics();
     titleEl.textContent = book.title;
     updateReaderSubtitle();
     updateBookmarkUi();
@@ -1055,30 +1370,49 @@ export function createReaderController({
     btnAa.classList.remove('active');
     searchOverlay.classList.add('hidden');
     closeMoreMenu();
+    setDockHidden(false);
 
+    document.body.classList.add('reader-open');
     overlay.classList.remove('hidden');
+    applyAppearance();
     requestWakeLock();
 
+    writeSessionSnapshot(
+      book.id,
+      restoreHint?.scrollY ?? book.scrollY ?? 0,
+      restoreHint?.scrollRatio ?? book.scrollRatio ?? 0,
+      currentPage
+    );
+
+    const content = await getBookContent(book.id);
+    if (seq !== openSequence || !currentBook) return;
+
     if (book.kind === 'pdf') {
-      await renderPdfBook(book);
+      await renderPdfBook(book, content?.rawBlob || book.rawBlob || null, restoreHint);
     } else {
-      renderHtmlOrDocxBook(book);
+      const html = content?.htmlContent ?? book.htmlContent ?? '';
+      renderHtmlOrDocxBook(book, html, restoreHint);
     }
-    applyAppearance();
+    if (seq === openSequence && currentBook) {
+      applyAppearance();
+    }
   }
 
   function close() {
     if (isEditing && isDirty) {
       if (!window.confirm('Bạn có thay đổi chưa lưu. Thoát trình đọc và hủy thay đổi?')) return;
     }
+    openSequence++;
+    flushCurrentProgressSync();
+    clearSessionSnapshot();
     stopTts();
     releaseWakeLock();
-    if (pdfObserver) { pdfObserver.disconnect(); pdfObserver = null; }
-    if (pdfDoc) { pdfDoc.destroy().catch(() => {}); pdfDoc = null; }
-    stageEl.innerHTML = '';
-    activeIframe = null;
+    cleanupStage();
     currentBook = null;
     isEditing = false;
+    setDockHidden(false);
+    delete overlay.dataset.readerTheme;
+    document.body.classList.remove('reader-open');
     overlay.classList.add('hidden');
     onCloseReader();
   }
